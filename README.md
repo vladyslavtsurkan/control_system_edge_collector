@@ -1,0 +1,120 @@
+# Edge Collector Service
+
+> Production-ready OPC UA → RabbitMQ bridge for IIoT telemetry, designed to run on edge devices (industrial PCs, Raspberry Pi).
+
+## Architecture
+
+```
+┌─────────────────┐   HTTPS    ┌──────────────┐
+│  Cloud SaaS API │ ◄──────────│              │
+│  (Control Plane)│            │              │   AMQP    ┌───────────┐
+└─────────────────┘   GET      │   Edge       │ ─────────►│ RabbitMQ  │
+                    /config    │   Collector  │  batched  │           │
+┌─────────────────┐            │   Service    │  JSON     └───────────┘
+│  OPC UA Server  │ ◄──────────│              │
+│  (Factory Floor)│ subscription│              │
+└─────────────────┘            └──────────────┘
+                                    :8080/healthz
+```
+
+**Control Plane** — On startup, fetches OPC UA configuration (server URL, sensors, auth) from the Cloud REST API.
+
+**Data Plane** — Subscribes to OPC UA data-change notifications, queues payloads internally, and publishes batched JSON arrays to RabbitMQ.
+
+## Quick Start
+
+### Prerequisites
+
+- Python 3.14+
+- Docker & Docker Compose (for local RabbitMQ)
+
+### 1. Clone & install
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+```
+
+### 2. Configure
+
+```bash
+cp .env.example .env
+# Edit .env with your Cloud API URL, API key, and AMQP details
+```
+
+### 3. Run with Docker Compose (recommended)
+
+```bash
+docker compose up -d rabbitmq   # start RabbitMQ first
+docker compose up collector     # start the collector
+```
+
+### 4. Run locally (development)
+
+```bash
+# Ensure RabbitMQ is running (e.g. via docker compose up -d rabbitmq)
+python -m app.main
+```
+
+### 5. Run tests
+
+```bash
+pytest -v
+```
+
+## Environment Variables
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `CLOUD_API_URL` | ✅ | — | Cloud SaaS API base URL |
+| `X_API_KEY` | ✅ | — | M2M authentication key |
+| `AMQP_URL` | ✅ | — | RabbitMQ connection string |
+| `AMQP_EXCHANGE` | ✅ | `iiot_telemetry` | AMQP exchange name |
+| `OPCUA_CERT_PATH` | ❌ | `None` | Client certificate for encrypted OPC UA policies |
+| `OPCUA_KEY_PATH` | ❌ | `None` | Client private key for encrypted OPC UA policies |
+| `HEALTH_HOST` | ❌ | `0.0.0.0` | Health endpoint bind address |
+| `HEALTH_PORT` | ❌ | `8080` | Health endpoint port |
+| `QUEUE_MAX_SIZE` | ❌ | `10000` | Internal queue capacity (store-and-forward buffer) |
+| `BATCH_SIZE` | ❌ | `100` | Max messages per AMQP batch |
+| `BATCH_TIMEOUT_S` | ❌ | `1.0` | Max seconds to wait before publishing a partial batch |
+
+## Health Endpoint
+
+```
+GET :8080/healthz
+
+200  {"status": "healthy",  "opcua_connected": true,  "amqp_connected": true}
+503  {"status": "degraded", "opcua_connected": true,  "amqp_connected": false}
+```
+
+## Project Structure
+
+```
+app/
+├── main.py                     # Orchestrator, signal handling, lifecycle
+├── settings.py                 # pydantic-settings (env vars)
+├── logging.py                  # structlog JSON configuration
+├── health.py                   # /healthz aiohttp server
+├── models/
+│   ├── config.py               # CollectorConfig, SensorConfig
+│   └── telemetry.py            # TelemetryPayload, TelemetryValue
+├── control_plane/
+│   └── api_client.py           # Cloud API client with retries
+├── data_plane/
+│   ├── opcua_subscriber.py     # asyncua subscription handler
+│   └── amqp_publisher.py       # aio_pika batch publisher
+└── utils/
+    └── backoff.py              # Exponential backoff helper
+```
+
+## Resilience Features
+
+- **Exponential backoff** on Cloud API, RabbitMQ connection failures
+- **Store-and-forward** — OPC UA keeps filling the internal queue during AMQP outages
+- **Graceful shutdown** — `SIGINT`/`SIGTERM` triggers clean OPC UA disconnect, queue flush, and AMQP close
+- **Bounded queue** — prevents memory leaks during prolonged disconnects
+
+## License
+
+Proprietary — Internal use only.

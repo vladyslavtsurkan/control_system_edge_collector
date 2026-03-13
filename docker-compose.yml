@@ -1,0 +1,25 @@
+services:
+  opcua-simulator:
+    build: .
+    container_name: opcua_simulator
+    entrypoint: ["python", "scripts/opcua_simulator.py"]
+    ports:
+      - "4840:4840"
+    restart: unless-stopped
+    networks:
+      - control-system-network
+
+  collector:
+    build: .
+    env_file:
+      - .env
+    depends_on:
+      opcua-simulator:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - control-system-network
+
+networks:
+  control-system-network:
+    external: true
