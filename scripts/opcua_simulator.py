@@ -27,7 +27,6 @@ from enum import Enum
 from typing import Any
 
 from asyncua import Server, ua
-ua.StatusCodes
 
 # ═══════════════════════════════════════════════════════════════════
 # Enums
