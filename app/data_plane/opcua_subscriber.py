@@ -16,9 +16,11 @@ from asyncua.crypto.security_policies import (
     SecurityPolicyNone,
 )
 
+from app.data_plane.persistent_buffer import PersistentEdgeBuffer
 from app.models.config import CollectorConfig
 from app.models.telemetry import TelemetryPayload, TelemetryValue
 from app.settings import get_settings
+from app.utils.backoff import retry_with_backoff
 
 __all__ = ["OpcuaSubscriber"]
 
@@ -46,17 +48,18 @@ SECURITY_MODE_MAP: dict[str, ua.MessageSecurityMode] = {
 class _DataChangeHandler:
     """asyncua subscription callback handler.
 
-    Receives ``datachange_notification`` events and pushes
-    :class:`TelemetryPayload` instances onto the internal queue.
+    Receives ``datachange_notification`` events and persists
+    :class:`TelemetryPayload` instances into SQLite.
     """
 
     def __init__(
         self,
         node_to_sensor: dict[str, UUID],
-        queue: asyncio.Queue[TelemetryPayload],
+        buffer: PersistentEdgeBuffer,
     ) -> None:
         self._node_to_sensor = node_to_sensor
-        self._queue = queue
+        self._buffer = buffer
+        self._pending_tasks: set[asyncio.Task[None]] = set()
 
     def datachange_notification(
         self,
@@ -82,14 +85,25 @@ class _DataChangeHandler:
             payload=TelemetryValue(value=val, status=status_str),
         )
 
+        task = asyncio.create_task(
+            self._buffer.put(payload.model_dump(mode="json")),
+            name="persist-telemetry",
+        )
+        self._pending_tasks.add(task)
+        task.add_done_callback(self._on_persist_done)
+
+    async def flush_pending(self) -> None:
+        """Wait for scheduled inserts to finish before shutdown."""
+        if not self._pending_tasks:
+            return
+        await asyncio.gather(*tuple(self._pending_tasks), return_exceptions=True)
+
+    def _on_persist_done(self, task: asyncio.Task[None]) -> None:
+        self._pending_tasks.discard(task)
         try:
-            self._queue.put_nowait(payload)
-        except asyncio.QueueFull:
-            log.warning(
-                "internal queue full – dropping telemetry point",
-                sensor_id=str(sensor_id),
-                node_id=node_id_str,
-            )
+            task.result()
+        except Exception:
+            log.exception("failed to persist telemetry payload")
 
 
 class OpcuaSubscriber:
@@ -100,13 +114,14 @@ class OpcuaSubscriber:
     def __init__(
         self,
         config: CollectorConfig,
-        queue: asyncio.Queue[TelemetryPayload],
+        buffer: PersistentEdgeBuffer,
     ) -> None:
         self._config = config
         self._settings = get_settings()
-        self._queue = queue
+        self._buffer = buffer
         self._client: Client | None = None
         self._subscription: Any | None = None
+        self._handler: _DataChangeHandler | None = None
         self._handles: list[Any] = []
         self._connected = False
 
@@ -118,10 +133,10 @@ class OpcuaSubscriber:
         """Connect to OPC UA, configure security and create subscriptions."""
         cfg = self._config
 
-        self._client = Client(url=cfg.url)
-
-        # ── Security ────────────────────────────────────
+        # ── Security validation (non-retryable configuration errors) ──
         policy_name = cfg.security_policy
+        policy_cls: type[SecurityPolicy] | None = None
+        mode: ua.MessageSecurityMode | None = None
         if policy_name != "None":
             policy_cls = SECURITY_POLICY_MAP.get(policy_name)
             if policy_cls is None:
@@ -136,46 +151,64 @@ class OpcuaSubscriber:
                 )
 
             mode = SECURITY_MODE_MAP[policy_name]
-            await self._client.set_security(
-                policy=policy_cls,
-                certificate=str(cert_path),
-                private_key=str(key_path),
-                mode=mode,
-            )
-            log.info(
-                "OPC UA security configured",
-                policy=policy_name,
-                mode=mode.name,
-            )
 
-        # Authentication
-        if cfg.authentication_method == "username_password":
-            self._client.set_user(cfg.username)
-            self._client.set_password(cfg.password)
-            log.info("OPC UA auth: username/password")
-        else:
-            log.info("OPC UA auth: anonymous")
+        async def _do_start() -> None:
+            # Create a fresh client for each attempt to avoid stale socket/session state.
+            client = Client(url=cfg.url)
+            try:
+                if policy_name != "None":
+                    assert policy_cls is not None
+                    assert mode is not None
+                    await client.set_security(
+                        policy=policy_cls,
+                        certificate=str(self._settings.OPCUA_CERT_PATH),
+                        private_key=str(self._settings.OPCUA_KEY_PATH),
+                        mode=mode,
+                    )
+                    log.info(
+                        "OPC UA security configured",
+                        policy=policy_name,
+                        mode=mode.name,
+                    )
 
-        # Connect
-        await self._client.connect()
-        self._connected = True
-        log.info("OPC UA connected", url=cfg.url)
+                if cfg.authentication_method == "username_password":
+                    client.set_user(cfg.username)
+                    client.set_password(cfg.password)
+                    log.info("OPC UA auth: username/password")
+                else:
+                    log.info("OPC UA auth: anonymous")
 
-        # Build node→sensor lookup
-        node_to_sensor: dict[str, UUID] = {s.node_id: s.id for s in cfg.sensors}
+                await client.connect()
 
-        # Subscribe
-        handler = _DataChangeHandler(node_to_sensor, self._queue)
-        self._subscription = await self._client.create_subscription(
-            period=100,  # ms – server may negotiate a different value
-            handler=handler,
-        )
+                node_to_sensor: dict[str, UUID] = {s.node_id: s.id for s in cfg.sensors}
+                handler = _DataChangeHandler(node_to_sensor, self._buffer)
+                subscription = await client.create_subscription(
+                    period=100,  # ms - server may negotiate a different value
+                    handler=handler,
+                )
+                nodes = [client.get_node(nid) for nid in node_to_sensor]
+                handles = await subscription.subscribe_data_change(nodes)
 
-        nodes = [self._client.get_node(nid) for nid in node_to_sensor]
-        self._handles = await self._subscription.subscribe_data_change(nodes)
-        log.info(
-            "OPC UA subscriptions created",
-            node_count=len(self._handles),
+                self._client = client
+                self._handler = handler
+                self._subscription = subscription
+                self._handles = handles
+                self._connected = True
+                log.info("OPC UA connected", url=cfg.url)
+                log.info("OPC UA subscriptions created", node_count=len(handles))
+            except Exception:
+                try:
+                    await client.disconnect()
+                except Exception:
+                    log.debug("failed to cleanup OPC UA client after startup error")
+                raise
+
+        await retry_with_backoff(
+            _do_start,
+            max_retries=self._settings.BACKOFF_MAX_RETRIES,
+            base_delay=self._settings.BACKOFF_BASE_S,
+            max_delay=self._settings.BACKOFF_MAX_S,
+            operation_name="opcua_start",
         )
 
     async def stop(self) -> None:
@@ -188,6 +221,10 @@ class OpcuaSubscriber:
                 log.exception("error unsubscribing from OPC UA")
             self._handles.clear()
             self._subscription = None
+
+        if self._handler is not None:
+            await self._handler.flush_pending()
+            self._handler = None
 
         if self._client:
             try:

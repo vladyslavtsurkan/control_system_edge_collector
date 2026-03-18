@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     HEALTH_PORT: int = Field(8080, alias="HEALTH_PORT")
 
     # Tuning
+    EDGE_BUFFER_DB_PATH: Path = Field(
+        Path("edge_buffer.db"), alias="EDGE_BUFFER_DB_PATH"
+    )
     QUEUE_MAX_SIZE: int = Field(10_000, alias="QUEUE_MAX_SIZE")
     BATCH_SIZE: int = Field(100, alias="BATCH_SIZE")
     BATCH_TIMEOUT_S: float = Field(1.0, alias="BATCH_TIMEOUT_S")
@@ -51,4 +54,3 @@ def get_settings() -> Settings:
     tools).
     """
     return Settings()
-

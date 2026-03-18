@@ -28,6 +28,7 @@ def settings(env_vars: None, monkeypatch: pytest.MonkeyPatch) -> Settings:
     monkeypatch.setattr("app.control_plane.api_client.get_settings", _getter)
     monkeypatch.setattr("app.data_plane.amqp_publisher.get_settings", _getter)
     monkeypatch.setattr("app.data_plane.opcua_subscriber.get_settings", _getter)
+    monkeypatch.setattr("app.data_plane.persistent_buffer.get_settings", _getter)
     return s
 
 

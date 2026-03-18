@@ -1,6 +1,6 @@
 """Pydantic models for the Cloud API ``/api/v1/collector/config`` response."""
 
-from typing import Literal
+from typing import Literal, Self
 from uuid import UUID
 
 from pydantic import BaseModel, model_validator
@@ -30,7 +30,7 @@ class CollectorConfig(BaseModel):
     sensors: list[SensorConfig]
 
     @model_validator(mode="after")
-    def _validate_credentials(self) -> "CollectorConfig":
+    def _validate_credentials(self) -> Self:
         if self.authentication_method == "username_password":
             if not self.username or not self.password:
                 raise ValueError(

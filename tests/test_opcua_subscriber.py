@@ -1,9 +1,9 @@
 """Tests for the OPC UA subscriber (unit-level, no real OPC UA server)."""
 
-import asyncio
 from unittest.mock import MagicMock
 from uuid import uuid4
 
+import pytest
 from asyncua.crypto.security_policies import (
     SecurityPolicyAes128Sha256RsaOaep,
     SecurityPolicyAes256Sha256RsaPss,
@@ -12,10 +12,11 @@ from asyncua.crypto.security_policies import (
 )
 
 from app.data_plane.opcua_subscriber import (
+    OpcuaSubscriber,
     SECURITY_POLICY_MAP,
     _DataChangeHandler,
 )
-from app.models.telemetry import TelemetryPayload
+from app.data_plane.persistent_buffer import PersistentEdgeBuffer
 
 
 class TestSecurityPolicyMap:
@@ -46,12 +47,13 @@ class TestSecurityPolicyMap:
 
 
 class TestDataChangeHandler:
-    def test_enqueues_payload(self) -> None:
+    async def test_persists_payload(self, tmp_path) -> None:
         sensor_id = uuid4()
         node_id = "ns=2;i=1001"
-        q: asyncio.Queue[TelemetryPayload] = asyncio.Queue(maxsize=10)
+        buffer = PersistentEdgeBuffer(tmp_path / "edge_buffer.db")
+        await buffer.initialize()
 
-        handler = _DataChangeHandler({node_id: sensor_id}, q)
+        handler = _DataChangeHandler({node_id: sensor_id}, buffer)
 
         # Build a mock node
         mock_node = MagicMock()
@@ -62,41 +64,159 @@ class TestDataChangeHandler:
         mock_data.monitored_item.Value.StatusCode.name = "Good"
 
         handler.datachange_notification(mock_node, 42.0, mock_data)
+        await handler.flush_pending()
 
-        assert q.qsize() == 1
-        item = q.get_nowait()
-        assert item.sensor_id == sensor_id
-        assert item.payload.value == 42.0
-        assert item.payload.status == "Good"
+        rows = await buffer.get_batch(10)
+        await buffer.close()
 
-    def test_unmapped_node_is_ignored(self) -> None:
-        q: asyncio.Queue[TelemetryPayload] = asyncio.Queue(maxsize=10)
-        handler = _DataChangeHandler({}, q)
+        assert len(rows) == 1
+        item = rows[0]["payload"]
+        assert item["sensor_id"] == str(sensor_id)
+        assert item["payload"]["value"] == 42.0
+        assert item["payload"]["status"] == "Good"
+
+    async def test_unmapped_node_is_ignored(self, tmp_path) -> None:
+        buffer = PersistentEdgeBuffer(tmp_path / "edge_buffer.db")
+        await buffer.initialize()
+        handler = _DataChangeHandler({}, buffer)
 
         mock_node = MagicMock()
         mock_node.nodeid.to_string.return_value = "ns=2;i=9999"
 
         mock_data = MagicMock()
         handler.datachange_notification(mock_node, 1, mock_data)
+        await handler.flush_pending()
 
-        assert q.qsize() == 0
+        rows = await buffer.get_batch(10)
+        await buffer.close()
+        assert rows == []
 
-    def test_full_queue_drops_message(self) -> None:
+    async def test_multiple_notifications_are_buffered_in_order(self, tmp_path) -> None:
         sensor_id = uuid4()
         node_id = "ns=2;i=1001"
-        q: asyncio.Queue[TelemetryPayload] = asyncio.Queue(maxsize=1)
+        buffer = PersistentEdgeBuffer(tmp_path / "edge_buffer.db")
+        await buffer.initialize()
 
-        handler = _DataChangeHandler({node_id: sensor_id}, q)
+        handler = _DataChangeHandler({node_id: sensor_id}, buffer)
 
         mock_node = MagicMock()
         mock_node.nodeid.to_string.return_value = node_id
         mock_data = MagicMock()
         mock_data.monitored_item.Value.StatusCode.name = "Good"
 
-        # Fill the queue
         handler.datachange_notification(mock_node, 1.0, mock_data)
-        assert q.qsize() == 1
-
-        # This should drop (queue full) without raising
         handler.datachange_notification(mock_node, 2.0, mock_data)
-        assert q.qsize() == 1
+        await handler.flush_pending()
+
+        rows = await buffer.get_batch(10)
+        await buffer.close()
+        assert [row["payload"]["payload"]["value"] for row in rows] == [1.0, 2.0]
+
+
+class TestOpcuaSubscriberStartupRetry:
+    async def test_start_retries_after_transient_connect_error(
+        self,
+        sample_config,
+        settings,
+        tmp_path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        object.__setattr__(settings, "BACKOFF_MAX_RETRIES", 3)
+        object.__setattr__(settings, "BACKOFF_BASE_S", 0.0)
+        object.__setattr__(settings, "BACKOFF_MAX_S", 0.0)
+
+        connect_attempts = 0
+
+        class _FakeSubscription:
+            async def subscribe_data_change(self, nodes):
+                return list(range(len(nodes)))
+
+            async def unsubscribe(self, _handles):
+                return None
+
+            async def delete(self):
+                return None
+
+        class _FakeClient:
+            def __init__(self, url: str) -> None:
+                self.url = url
+
+            async def set_security(self, **_kwargs):
+                return None
+
+            def set_user(self, _user: str) -> None:
+                return None
+
+            def set_password(self, _password: str) -> None:
+                return None
+
+            async def connect(self) -> None:
+                nonlocal connect_attempts
+                connect_attempts += 1
+                if connect_attempts == 1:
+                    raise ConnectionRefusedError("simulated startup race")
+
+            async def create_subscription(self, period: int, handler):
+                _ = (period, handler)
+                return _FakeSubscription()
+
+            def get_node(self, node_id: str):
+                return node_id
+
+            async def disconnect(self) -> None:
+                return None
+
+        monkeypatch.setattr("app.data_plane.opcua_subscriber.Client", _FakeClient)
+
+        buffer = PersistentEdgeBuffer(tmp_path / "edge_buffer.db")
+        await buffer.initialize()
+
+        subscriber = OpcuaSubscriber(sample_config, buffer)
+        await subscriber.start()
+
+        assert subscriber.is_connected is True
+        assert connect_attempts == 2
+
+        await subscriber.stop()
+        await buffer.close()
+
+    async def test_start_raises_after_retry_exhausted(
+        self,
+        sample_config,
+        settings,
+        tmp_path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        object.__setattr__(settings, "BACKOFF_MAX_RETRIES", 2)
+        object.__setattr__(settings, "BACKOFF_BASE_S", 0.0)
+        object.__setattr__(settings, "BACKOFF_MAX_S", 0.0)
+
+        class _FakeClient:
+            def __init__(self, url: str) -> None:
+                self.url = url
+
+            async def set_security(self, **_kwargs):
+                return None
+
+            def set_user(self, _user: str) -> None:
+                return None
+
+            def set_password(self, _password: str) -> None:
+                return None
+
+            async def connect(self) -> None:
+                raise ConnectionRefusedError("still down")
+
+            async def disconnect(self) -> None:
+                return None
+
+        monkeypatch.setattr("app.data_plane.opcua_subscriber.Client", _FakeClient)
+
+        buffer = PersistentEdgeBuffer(tmp_path / "edge_buffer.db")
+        await buffer.initialize()
+
+        subscriber = OpcuaSubscriber(sample_config, buffer)
+        with pytest.raises(ConnectionRefusedError):
+            await subscriber.start()
+
+        await buffer.close()

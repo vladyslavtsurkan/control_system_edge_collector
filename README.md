@@ -19,7 +19,7 @@
 
 **Control Plane** — On startup, fetches OPC UA configuration (server URL, sensors, auth) from the Cloud REST API.
 
-**Data Plane** — Subscribes to OPC UA data-change notifications, queues payloads internally, and publishes batched JSON arrays to RabbitMQ.
+**Data Plane** — Subscribes to OPC UA data-change notifications, persists payloads in a local SQLite buffer, and publishes batched JSON arrays to RabbitMQ.
 
 ## Quick Start
 
@@ -75,9 +75,13 @@ pytest -v
 | `OPCUA_KEY_PATH` | ❌ | `None` | Client private key for encrypted OPC UA policies |
 | `HEALTH_HOST` | ❌ | `0.0.0.0` | Health endpoint bind address |
 | `HEALTH_PORT` | ❌ | `8080` | Health endpoint port |
-| `QUEUE_MAX_SIZE` | ❌ | `10000` | Internal queue capacity (store-and-forward buffer) |
+| `EDGE_BUFFER_DB_PATH` | ❌ | `edge_buffer.db` | Local SQLite file for durable store-and-forward |
+| `QUEUE_MAX_SIZE` | ❌ | `10000` | Deprecated legacy setting from in-memory queue implementation |
 | `BATCH_SIZE` | ❌ | `100` | Max messages per AMQP batch |
 | `BATCH_TIMEOUT_S` | ❌ | `1.0` | Max seconds to wait before publishing a partial batch |
+| `BACKOFF_BASE_S` | ❌ | `1.0` | Initial delay used for AMQP reconnect retries |
+| `BACKOFF_MAX_S` | ❌ | `60.0` | Maximum delay cap used for AMQP reconnect retries |
+| `BACKOFF_MAX_RETRIES` | ❌ | `5` | Maximum AMQP reconnect attempts per retry cycle |
 
 ## Health Endpoint
 
@@ -111,9 +115,28 @@ app/
 ## Resilience Features
 
 - **Exponential backoff** on Cloud API, RabbitMQ connection failures
-- **Store-and-forward** — OPC UA keeps filling the internal queue during AMQP outages
-- **Graceful shutdown** — `SIGINT`/`SIGTERM` triggers clean OPC UA disconnect, queue flush, and AMQP close
-- **Bounded queue** — prevents memory leaks during prolonged disconnects
+- **Durable store-and-forward** — telemetry is persisted in SQLite and survives process/device restarts
+- **At-least-once handoff** — records are deleted only after successful AMQP publish
+- **Graceful shutdown** — `SIGINT`/`SIGTERM` triggers clean OPC UA disconnect and AMQP shutdown
+
+## Publisher Worker Logic (Simplified)
+
+```python
+while True:
+    rows = await buffer.get_batch(batch_size=100)
+    if not rows:
+        await asyncio.sleep(1.0)
+        continue
+
+    ids = [row["id"] for row in rows]
+    payloads = [row["payload"] for row in rows]
+
+    try:
+        await exchange.publish(make_message(payloads), routing_key="telemetry")
+        await buffer.commit(ids)  # delete only after successful publish
+    except aio_pika.exceptions.CONNECTION_EXCEPTIONS:
+        await asyncio.sleep(1.0)  # retry later, do not commit
+```
 
 ## License
 

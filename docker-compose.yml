@@ -3,6 +3,12 @@ services:
     build: .
     container_name: opcua_simulator
     entrypoint: ["python", "scripts/opcua_simulator.py"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.create_connection(('127.0.0.1', 4840), timeout=2); s.close()"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 3s
     ports:
       - "4840:4840"
     restart: unless-stopped
@@ -15,7 +21,7 @@ services:
       - .env
     depends_on:
       opcua-simulator:
-        condition: service_started
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - control-system-network

@@ -15,8 +15,6 @@ Node configuration lives in the ``NODES`` list below.
 Add / remove / tweak entries directly in Python — no external files needed.
 """
 
-from __future__ import annotations
-
 import argparse
 import asyncio
 import math
@@ -254,8 +252,10 @@ def _generate_bool(node: NodeDef) -> bool:
 
 
 def _generate_int(node: NodeDef) -> int:
-    prev = node._current if node._current is not None else (
-        node.int_values[0] if node.int_values else int(node.min)
+    prev = (
+        node._current
+        if node._current is not None
+        else (node.int_values[0] if node.int_values else int(node.min))
     )
     if random.random() < node.toggle_probability:
         if node.int_values:
@@ -315,7 +315,7 @@ async def run_server(host: str, port: int, interval: float) -> None:
     ua_vars: dict[str, Any] = {}
     for nd in NODES:
         vt = VARIANT_TYPE[nd.type]
-        node_id = ua.NodeId(nd.name, idx)          # → ns=2;s=<Name>
+        node_id = ua.NodeId(nd.name, idx)  # → ns=2;s=<Name>
         var = await plant.add_variable(
             node_id,
             nd.name,
@@ -340,7 +340,7 @@ async def run_server(host: str, port: int, interval: float) -> None:
     print(f"  Namespace: {idx} (urn:edge-collector:simulator)")
     print(f"  Interval : {interval}s")
     print(f"  Nodes    : {len(NODES)}")
-    print(f"  Auth     : anonymous")
+    print("  Auth     : anonymous")
     print(separator)
     print()
 
@@ -358,9 +358,7 @@ async def run_server(host: str, port: int, interval: float) -> None:
                 await ua_vars[nd.name].write_value(ua.Variant(val, vt))
 
             # Compact one-line status (first 4 nodes as a sample)
-            sample = " | ".join(
-                f"{nd.name}={nd._current}" for nd in NODES[:4]
-            )
+            sample = " | ".join(f"{nd.name}={nd._current}" for nd in NODES[:4])
             print(f"  [t={t:>7.1f}s] {sample}", end="\r")
 
             await asyncio.sleep(interval)
@@ -402,5 +400,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-

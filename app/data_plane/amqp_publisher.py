@@ -2,11 +2,13 @@
 
 import asyncio
 import json
+from collections.abc import Sequence
+from typing import Any
 
 import aio_pika
 import structlog
 
-from app.models.telemetry import TelemetryPayload
+from app.data_plane.persistent_buffer import PersistentEdgeBuffer
 from app.settings import get_settings
 from app.utils.backoff import retry_with_backoff
 
@@ -16,22 +18,22 @@ log = structlog.get_logger()
 
 
 class AmqpPublisher:
-    """Reads :class:`TelemetryPayload` items from an :class:`asyncio.Queue`,
-    batches them, and publishes JSON arrays to a RabbitMQ exchange.
+    """Reads telemetry payloads from :class:`PersistentEdgeBuffer`, batches
+    them, and publishes JSON arrays to a RabbitMQ exchange.
 
     **Store-and-forward**: if the AMQP connection drops, the OPC UA
-    subscriber keeps filling the queue (up to its *maxsize*).  This
-    publisher reconnects with exponential back-off and drains the queue
+    subscriber keeps filling the SQLite buffer. This
+    publisher reconnects with exponential back-off and drains the buffer
     once the connection is restored.
     """
 
     def __init__(
         self,
-        queue: asyncio.Queue[TelemetryPayload],
+        buffer: PersistentEdgeBuffer,
         shutdown_event: asyncio.Event,
     ) -> None:
         self._settings = get_settings()
-        self._queue = queue
+        self._buffer = buffer
         self._shutdown = shutdown_event
         self._connection: aio_pika.abc.AbstractRobustConnection | None = None
         self._channel: aio_pika.abc.AbstractChannel | None = None
@@ -79,37 +81,11 @@ class AmqpPublisher:
             self._connected = False
             await self._connect()
 
-    # Batch collection
-
-    async def _collect_batch(self) -> list[TelemetryPayload]:
-        """Collect up to ``BATCH_SIZE`` items **or** wait up to
-        ``BATCH_TIMEOUT_S`` – whichever comes first.
-        """
-        batch: list[TelemetryPayload] = []
-        deadline = asyncio.get_event_loop().time() + self._settings.BATCH_TIMEOUT_S
-
-        while len(batch) < self._settings.BATCH_SIZE:
-            remaining = deadline - asyncio.get_event_loop().time()
-            if remaining <= 0:
-                break
-            try:
-                item = await asyncio.wait_for(
-                    self._queue.get(),
-                    timeout=remaining,
-                )
-                batch.append(item)
-            except TimeoutError:
-                break
-
-        return batch
-
     # Publishing
 
-    async def _publish_batch(self, batch: list[TelemetryPayload]) -> None:
+    async def _publish_batch(self, batch: Sequence[dict[str, Any]]) -> None:
         """Serialise *batch* as a JSON array and publish to the exchange."""
-        body = json.dumps(
-            [p.model_dump(mode="json") for p in batch],
-        ).encode()
+        body = json.dumps(list(batch)).encode()
 
         message = aio_pika.Message(
             body=body,
@@ -125,57 +101,37 @@ class AmqpPublisher:
     # ── Main loop ───────────────────────────────────────────────────
 
     async def run(self) -> None:
-        """Run the publisher loop until the shutdown event is set and
-        the queue is drained.
-        """
-        await self._ensure_connected()
-
-        while not self._shutdown.is_set():
-            batch = await self._collect_batch()
-            if not batch:
+        """Get oldest batches from the buffer, publish, then commit on success."""
+        while True:
+            records = await self._buffer.get_batch(self._settings.BATCH_SIZE)
+            if not records:
+                if self._shutdown.is_set():
+                    break
+                await asyncio.sleep(self._settings.BATCH_TIMEOUT_S)
                 continue
+
+            ids = [int(record["id"]) for record in records]
+            payloads = [record["payload"] for record in records]
+
             try:
-                await self._publish_batch(batch)
-            except Exception:
+                await self._ensure_connected()
+                await self._publish_batch(payloads)
+                await self._buffer.commit(ids)
+            except aio_pika.exceptions.CONNECTION_EXCEPTIONS:
                 log.exception(
-                    "AMQP publish failed – will reconnect",
-                    batch_size=len(batch),
+                    "AMQP connection error - retaining batch for retry",
+                    batch_size=len(payloads),
                 )
-                # Put items back so they aren't lost.
-                for item in batch:
-                    try:
-                        self._queue.put_nowait(item)
-                    except asyncio.QueueFull:
-                        log.warning("queue full while re-enqueuing after AMQP failure")
-                        break
                 self._connected = False
-                await self._ensure_connected()
-
-        # Flush remaining items on shutdown
-        await self._flush()
-
-    async def _flush(self) -> None:
-        """Drain whatever is left in the queue and publish a final batch."""
-        remaining: list[TelemetryPayload] = []
-        while not self._queue.empty():
-            try:
-                remaining.append(self._queue.get_nowait())
-            except asyncio.QueueEmpty:
-                break
-
-        if remaining:
-            try:
-                await self._ensure_connected()
-                # Publish in chunks of BATCH_SIZE
-                for i in range(0, len(remaining), self._settings.BATCH_SIZE):
-                    chunk = remaining[i : i + self._settings.BATCH_SIZE]
-                    await self._publish_batch(chunk)
-                log.info("flushed remaining telemetry", count=len(remaining))
+                await asyncio.sleep(self._settings.BACKOFF_BASE_S)
             except Exception:
                 log.exception(
-                    "failed to flush remaining telemetry on shutdown",
-                    lost_count=len(remaining),
+                    "AMQP publish failed - retaining batch for retry",
+                    batch_size=len(payloads),
                 )
+                await asyncio.sleep(self._settings.BACKOFF_BASE_S)
+
+        log.info("publisher loop stopped - persistent buffer drained")
 
     async def close(self) -> None:
         """Close channel and connection."""

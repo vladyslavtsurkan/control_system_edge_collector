@@ -4,11 +4,11 @@ Lifecycle
 ---------
 1. Load settings from environment / ``.env``.
 2. Fetch OPC UA collector configuration from the Cloud API.
-3. Start OPC UA subscriptions  →  internal ``asyncio.Queue``.
-4. Start AMQP batch publisher  ←  internal ``asyncio.Queue``.
+3. Start OPC UA subscriptions  →  persistent SQLite edge buffer.
+4. Start AMQP batch publisher  ←  persistent SQLite edge buffer.
 5. Start ``/healthz`` HTTP endpoint.
 6. Wait for ``SIGINT`` / ``SIGTERM``.
-7. Graceful shutdown: stop OPC UA, flush queue, close AMQP.
+7. Graceful shutdown: stop OPC UA, drain buffer, close AMQP.
 """
 
 import asyncio
@@ -20,9 +20,9 @@ import structlog
 from app.control_plane.api_client import fetch_collector_config
 from app.data_plane.amqp_publisher import AmqpPublisher
 from app.data_plane.opcua_subscriber import OpcuaSubscriber
+from app.data_plane.persistent_buffer import PersistentEdgeBuffer
 from app.health import HealthServer
 from app.logging import setup_logging
-from app.models.telemetry import TelemetryPayload
 from app.settings import get_settings
 
 log = structlog.get_logger()
@@ -43,14 +43,13 @@ async def main() -> None:
     config = await fetch_collector_config()
 
     # Shared resources
-    queue: asyncio.Queue[TelemetryPayload] = asyncio.Queue(
-        maxsize=settings.QUEUE_MAX_SIZE,
-    )
+    buffer = PersistentEdgeBuffer(settings.EDGE_BUFFER_DB_PATH)
+    await buffer.initialize()
     shutdown_event = asyncio.Event()
 
     # Instantiate components
-    subscriber = OpcuaSubscriber(config, queue)
-    publisher = AmqpPublisher(queue, shutdown_event)
+    subscriber = OpcuaSubscriber(config, buffer)
+    publisher = AmqpPublisher(buffer, shutdown_event)
     health = HealthServer(
         settings.HEALTH_HOST,
         settings.HEALTH_PORT,
@@ -99,6 +98,7 @@ async def main() -> None:
             pass
 
     await publisher.close()
+    await buffer.close()
     await health.stop()
     log.info("edge collector stopped")
 

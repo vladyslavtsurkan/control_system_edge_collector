@@ -2,75 +2,37 @@
 
 import asyncio
 import json
-from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock
-from uuid import uuid4
+from unittest.mock import AsyncMock
+
+import aio_pika
 
 from app.data_plane.amqp_publisher import AmqpPublisher
-from app.models.telemetry import TelemetryPayload, TelemetryValue
+from app.data_plane.persistent_buffer import PersistentEdgeBuffer
 from app.settings import Settings
 
 
-def _make_payload() -> TelemetryPayload:
-    return TelemetryPayload(
-        sensor_id=uuid4(),
-        time=datetime.now(UTC),
-        payload=TelemetryValue(value=42.0, status="Good"),
-    )
-
-
-class TestCollectBatch:
-    async def test_collects_up_to_batch_size(self, settings: Settings) -> None:
-        q: asyncio.Queue[TelemetryPayload] = asyncio.Queue(maxsize=200)
-        shutdown = asyncio.Event()
-        pub = AmqpPublisher(q, shutdown)
-
-        # Override for fast test
-        object.__setattr__(settings, "BATCH_SIZE", 5)
-        object.__setattr__(settings, "BATCH_TIMEOUT_S", 5.0)
-
-        for _ in range(10):
-            await q.put(_make_payload())
-
-        batch = await pub._collect_batch()
-        assert len(batch) == 5
-
-    async def test_collects_partial_on_timeout(self, settings: Settings) -> None:
-        q: asyncio.Queue[TelemetryPayload] = asyncio.Queue(maxsize=200)
-        shutdown = asyncio.Event()
-        pub = AmqpPublisher(q, shutdown)
-
-        object.__setattr__(settings, "BATCH_SIZE", 100)
-        object.__setattr__(settings, "BATCH_TIMEOUT_S", 0.05)
-
-        await q.put(_make_payload())
-        await q.put(_make_payload())
-
-        batch = await pub._collect_batch()
-        assert len(batch) == 2
-
-    async def test_empty_queue_returns_empty(self, settings: Settings) -> None:
-        q: asyncio.Queue[TelemetryPayload] = asyncio.Queue(maxsize=200)
-        shutdown = asyncio.Event()
-        pub = AmqpPublisher(q, shutdown)
-
-        object.__setattr__(settings, "BATCH_SIZE", 100)
-        object.__setattr__(settings, "BATCH_TIMEOUT_S", 0.05)
-
-        batch = await pub._collect_batch()
-        assert len(batch) == 0
+def _make_record(record_id: int) -> dict:
+    return {
+        "id": record_id,
+        "payload": {
+            "sensor_id": "11111111-1111-1111-1111-111111111111",
+            "time": "2026-01-01T00:00:00Z",
+            "payload": {"value": 42.0, "status": "Good"},
+        },
+        "created_at": "2026-01-01 00:00:00",
+    }
 
 
 class TestPublishBatch:
     async def test_publish_serialises_json_array(self, settings: Settings) -> None:
-        q: asyncio.Queue[TelemetryPayload] = asyncio.Queue(maxsize=200)
+        buffer = AsyncMock(spec=PersistentEdgeBuffer)
         shutdown = asyncio.Event()
-        pub = AmqpPublisher(q, shutdown)
+        pub = AmqpPublisher(buffer, shutdown)
 
         mock_exchange = AsyncMock()
         pub._exchange = mock_exchange
 
-        batch = [_make_payload(), _make_payload()]
+        batch = [_make_record(1)["payload"], _make_record(2)["payload"]]
         await pub._publish_batch(batch)
 
         mock_exchange.publish.assert_awaited_once()
@@ -82,22 +44,64 @@ class TestPublishBatch:
         assert parsed[0]["payload"]["value"] == 42.0
 
 
-class TestFlush:
-    async def test_flush_drains_queue(self, settings: Settings) -> None:
-        q: asyncio.Queue[TelemetryPayload] = asyncio.Queue(maxsize=200)
+class TestRunLoop:
+    async def test_commits_after_successful_publish(self, settings: Settings) -> None:
+        buffer = AsyncMock(spec=PersistentEdgeBuffer)
         shutdown = asyncio.Event()
-        pub = AmqpPublisher(q, shutdown)
+        shutdown.set()
+        pub = AmqpPublisher(buffer, shutdown)
 
-        for _ in range(3):
-            await q.put(_make_payload())
+        object.__setattr__(settings, "BATCH_SIZE", 10)
 
-        mock_exchange = AsyncMock()
-        pub._exchange = mock_exchange
-        pub._connected = True
-        pub._connection = MagicMock()
-        pub._connection.is_closed = False
+        first_batch = [_make_record(1), _make_record(2)]
+        buffer.get_batch = AsyncMock(side_effect=[first_batch, []])
+        buffer.commit = AsyncMock()
+        pub._ensure_connected = AsyncMock()
+        pub._publish_batch = AsyncMock()
 
-        await pub._flush()
+        await pub.run()
 
-        assert q.empty()
-        mock_exchange.publish.assert_awaited_once()
+        pub._publish_batch.assert_awaited_once_with(
+            [first_batch[0]["payload"], first_batch[1]["payload"]]
+        )
+        buffer.commit.assert_awaited_once_with([1, 2])
+
+    async def test_connection_error_does_not_commit(self, settings: Settings) -> None:
+        buffer = AsyncMock(spec=PersistentEdgeBuffer)
+        shutdown = asyncio.Event()
+        shutdown.set()
+        pub = AmqpPublisher(buffer, shutdown)
+
+        object.__setattr__(settings, "BATCH_SIZE", 10)
+        object.__setattr__(settings, "BACKOFF_BASE_S", 0.0)
+
+        first_batch = [_make_record(1)]
+        buffer.get_batch = AsyncMock(side_effect=[first_batch, []])
+        buffer.commit = AsyncMock()
+        pub._ensure_connected = AsyncMock()
+        pub._publish_batch = AsyncMock(
+            side_effect=aio_pika.exceptions.AMQPConnectionError("down")
+        )
+
+        await pub.run()
+
+        buffer.commit.assert_not_awaited()
+
+    async def test_waits_when_buffer_is_empty(self, settings: Settings) -> None:
+        buffer = AsyncMock(spec=PersistentEdgeBuffer)
+        shutdown = asyncio.Event()
+        pub = AmqpPublisher(buffer, shutdown)
+
+        object.__setattr__(settings, "BATCH_TIMEOUT_S", 0.0)
+
+        async def _get_batch(_size: int) -> list[dict]:
+            shutdown.set()
+            return []
+
+        buffer.get_batch = AsyncMock(side_effect=_get_batch)
+        pub._ensure_connected = AsyncMock()
+        pub._publish_batch = AsyncMock()
+
+        await pub.run()
+
+        pub._publish_batch.assert_not_awaited()
