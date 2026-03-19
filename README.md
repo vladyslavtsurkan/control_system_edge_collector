@@ -17,7 +17,7 @@
                                     :8080/healthz
 ```
 
-**Control Plane** — On startup, fetches OPC UA configuration (server URL, sensors, auth) from the Cloud REST API.
+**Control Plane** — Fetches OPC UA configuration (server URL, sensors, auth) from the Cloud REST API on startup and then refreshes it periodically.
 
 **Data Plane** — Subscribes to OPC UA data-change notifications, persists payloads in a local SQLite buffer, and publishes batched JSON arrays to RabbitMQ.
 
@@ -79,6 +79,8 @@ pytest -v
 | `QUEUE_MAX_SIZE` | ❌ | `10000` | Deprecated legacy setting from in-memory queue implementation |
 | `BATCH_SIZE` | ❌ | `100` | Max messages per AMQP batch |
 | `BATCH_TIMEOUT_S` | ❌ | `1.0` | Max seconds to wait before publishing a partial batch |
+| `CONFIG_REFRESH_INTERVAL_S` | ❌ | `300.0` | Base interval (seconds) between Cloud config refresh requests |
+| `CONFIG_REFRESH_JITTER_S` | ❌ | `10.0` | Random offset (0..N seconds) added to each config refresh interval |
 | `BACKOFF_BASE_S` | ❌ | `1.0` | Initial delay used for AMQP reconnect retries |
 | `BACKOFF_MAX_S` | ❌ | `60.0` | Maximum delay cap used for AMQP reconnect retries |
 | `BACKOFF_MAX_RETRIES` | ❌ | `5` | Maximum AMQP reconnect attempts per retry cycle |
@@ -115,6 +117,7 @@ app/
 ## Resilience Features
 
 - **Exponential backoff** on Cloud API, RabbitMQ connection failures
+- **Dynamic config reload** — periodically refreshes Cloud config and reconfigures OPC UA subscriptions when runtime fields change
 - **Durable store-and-forward** — telemetry is persisted in SQLite and survives process/device restarts
 - **At-least-once handoff** — records are deleted only after successful AMQP publish
 - **Graceful shutdown** — `SIGINT`/`SIGTERM` triggers clean OPC UA disconnect and AMQP shutdown

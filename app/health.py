@@ -23,8 +23,8 @@ class HealthServer:
         self,
         host: str,
         port: int,
-        subscriber: OpcuaSubscriber,
-        publisher: AmqpPublisher,
+        subscriber: "OpcuaSubscriber",
+        publisher: "AmqpPublisher",
     ) -> None:
         self._host = host
         self._port = port

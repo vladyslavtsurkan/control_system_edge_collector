@@ -19,6 +19,8 @@ class TestSettings:
         assert str(s.EDGE_BUFFER_DB_PATH) == "edge_buffer.db"
         assert s.BATCH_SIZE == 100
         assert s.BATCH_TIMEOUT_S == 1.0
+        assert s.CONFIG_REFRESH_INTERVAL_S == 300.0
+        assert s.CONFIG_REFRESH_JITTER_S == 10.0
         assert s.HEALTH_PORT == 8080
         assert s.OPCUA_CERT_PATH is None
 

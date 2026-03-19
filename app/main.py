@@ -4,11 +4,12 @@ Lifecycle
 ---------
 1. Load settings from environment / ``.env``.
 2. Fetch OPC UA collector configuration from the Cloud API.
-3. Start OPC UA subscriptions  →  persistent SQLite edge buffer.
-4. Start AMQP batch publisher  ←  persistent SQLite edge buffer.
-5. Start ``/healthz`` HTTP endpoint.
-6. Wait for ``SIGINT`` / ``SIGTERM``.
-7. Graceful shutdown: stop OPC UA, drain buffer, close AMQP.
+3. Refresh OPC UA collector configuration periodically and apply changes.
+4. Start OPC UA subscriptions  →  persistent SQLite edge buffer.
+5. Start AMQP batch publisher  ←  persistent SQLite edge buffer.
+6. Start ``/healthz`` HTTP endpoint.
+7. Wait for ``SIGINT`` / ``SIGTERM``.
+8. Graceful shutdown: stop OPC UA, drain buffer, close AMQP.
 """
 
 import asyncio
@@ -18,6 +19,7 @@ import sys
 import structlog
 
 from app.control_plane.api_client import fetch_collector_config
+from app.control_plane.config_refresh import config_refresh_loop
 from app.data_plane.amqp_publisher import AmqpPublisher
 from app.data_plane.opcua_subscriber import OpcuaSubscriber
 from app.data_plane.persistent_buffer import PersistentEdgeBuffer
@@ -75,6 +77,10 @@ async def main() -> None:
 
     await health.start()
 
+    config_refresh_task = asyncio.create_task(
+        config_refresh_loop(subscriber, shutdown_event, config),
+        name="config-refresh",
+    )
     publisher_task = asyncio.create_task(publisher.run(), name="amqp-publisher")
     log.info("edge collector running – press Ctrl+C to stop")
 
@@ -83,6 +89,12 @@ async def main() -> None:
 
     # Graceful teardown
     log.info("shutting down …")
+
+    config_refresh_task.cancel()
+    try:
+        await config_refresh_task
+    except asyncio.CancelledError:
+        pass
 
     await subscriber.stop()
 
