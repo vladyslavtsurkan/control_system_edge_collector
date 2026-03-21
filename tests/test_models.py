@@ -73,7 +73,7 @@ class TestTelemetryPayload:
     def test_serialisation_roundtrip(self) -> None:
         tp = TelemetryPayload(
             sensor_id=uuid4(),
-            time=datetime.now(UTC),
+            time=int(datetime.now(UTC).timestamp() * 1000),
             payload=TelemetryValue(value=23.5, status="Good"),
         )
         d = tp.model_dump(mode="json")

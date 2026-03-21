@@ -1,13 +1,14 @@
 """Tests for the AMQP batch publisher (unit-level, no real RabbitMQ)."""
 
 import asyncio
-import json
+from datetime import datetime
 from unittest.mock import AsyncMock
 
 import aio_pika
 
 from app.data_plane.amqp_publisher import AmqpPublisher
 from app.data_plane.persistent_buffer import PersistentEdgeBuffer
+from app.generated import telemetry_pb2
 from app.settings import Settings
 
 
@@ -16,7 +17,7 @@ def _make_record(record_id: int) -> dict:
         "id": record_id,
         "payload": {
             "sensor_id": "11111111-1111-1111-1111-111111111111",
-            "time": "2026-01-01T00:00:00Z",
+            "time": int(datetime(2026, 1, 1, 0, 0, 0).timestamp() * 1000),
             "payload": {"value": 42.0, "status": "Good"},
         },
         "created_at": "2026-01-01 00:00:00",
@@ -24,7 +25,7 @@ def _make_record(record_id: int) -> dict:
 
 
 class TestPublishBatch:
-    async def test_publish_serialises_json_array(self, settings: Settings) -> None:
+    async def test_publish_serialises_protobuf_batch(self, settings: Settings) -> None:
         buffer = AsyncMock(spec=PersistentEdgeBuffer)
         shutdown = asyncio.Event()
         pub = AmqpPublisher(buffer, shutdown)
@@ -38,10 +39,13 @@ class TestPublishBatch:
         mock_exchange.publish.assert_awaited_once()
         call_args = mock_exchange.publish.call_args
         message = call_args[0][0]
-        parsed = json.loads(message.body)
-        assert isinstance(parsed, list)
-        assert len(parsed) == 2
-        assert parsed[0]["payload"]["value"] == 42.0
+
+        parsed = telemetry_pb2.TelemetryBatch()
+        parsed.ParseFromString(message.body)
+
+        assert len(parsed.readings) == 2
+        assert parsed.readings[0].payload.float_val == 42.0
+        assert message.content_type == "application/x-protobuf"
 
 
 class TestRunLoop:
