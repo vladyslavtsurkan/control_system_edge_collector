@@ -381,4 +381,3 @@ class TestOpcuaSubscriberReconfigure:
 
         await subscriber.stop()
         await buffer.close()
-

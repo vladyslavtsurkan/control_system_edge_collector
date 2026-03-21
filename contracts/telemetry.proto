@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package iiot.telemetry.v1;
+
+message TelemetryPayload {
+    string status = 1;
+
+    oneof value {
+        bool bool_val = 2;
+        int64 int_val = 3;
+        double float_val = 4;
+        string str_val = 5;
+    }
+}
+
+message TelemetryReading {
+    string sensor_id = 1;
+    int64 time = 2;
+    TelemetryPayload payload = 3;
+}
+
+message TelemetryBatch {
+    repeated TelemetryReading readings = 1;
+}

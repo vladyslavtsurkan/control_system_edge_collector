@@ -1,7 +1,6 @@
 """OPC UA subscription handler using *asyncua*."""
 
 import asyncio
-from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -81,7 +80,6 @@ class _DataChangeHandler:
 
         payload = TelemetryPayload(
             sensor_id=sensor_id,
-            time=datetime.now(UTC),
             payload=TelemetryValue(value=val, status=status_str),
         )
 
@@ -139,7 +137,9 @@ class OpcuaSubscriber:
         return {sensor.node_id: sensor.id for sensor in config.sensors}
 
     @staticmethod
-    def _requires_reconnect(previous: CollectorConfig, updated: CollectorConfig) -> bool:
+    def _requires_reconnect(
+        previous: CollectorConfig, updated: CollectorConfig
+    ) -> bool:
         return (
             previous.url != updated.url
             or previous.security_policy != updated.security_policy
@@ -312,7 +312,9 @@ class OpcuaSubscriber:
             return
 
         new_node_to_sensor = self._build_node_to_sensor(config)
-        removed_node_ids = sorted(set(previous_node_to_sensor) - set(new_node_to_sensor))
+        removed_node_ids = sorted(
+            set(previous_node_to_sensor) - set(new_node_to_sensor)
+        )
         added_node_ids = sorted(set(new_node_to_sensor) - set(previous_node_to_sensor))
 
         try:

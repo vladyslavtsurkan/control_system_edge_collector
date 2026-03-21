@@ -54,4 +54,3 @@ class TestConfigRefreshHelpers:
 
         assert diff["changed_fields"] == ["password"]
         assert diff["details"]["password"] == {"before": "***", "after": "***"}
-

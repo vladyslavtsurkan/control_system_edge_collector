@@ -1,15 +1,12 @@
 """Lightweight ``/healthz`` HTTP endpoint for container orchestrators."""
 
 import json
-from typing import TYPE_CHECKING
 
 from aiohttp import web
-
 import structlog
 
-if TYPE_CHECKING:
-    from app.data_plane.amqp_publisher import AmqpPublisher
-    from app.data_plane.opcua_subscriber import OpcuaSubscriber
+from app.data_plane.amqp_publisher import AmqpPublisher
+from app.data_plane.opcua_subscriber import OpcuaSubscriber
 
 __all__ = ["HealthServer"]
 
@@ -23,8 +20,8 @@ class HealthServer:
         self,
         host: str,
         port: int,
-        subscriber: "OpcuaSubscriber",
-        publisher: "AmqpPublisher",
+        subscriber: OpcuaSubscriber,
+        publisher: AmqpPublisher,
     ) -> None:
         self._host = host
         self._port = port

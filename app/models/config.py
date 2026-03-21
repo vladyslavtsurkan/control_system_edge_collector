@@ -14,7 +14,7 @@ class SensorConfig(BaseModel):
     id: UUID
     name: str
     node_id: str
-    units: str
+    units: str | None
 
 
 class CollectorConfig(BaseModel):

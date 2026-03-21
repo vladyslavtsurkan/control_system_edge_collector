@@ -116,4 +116,3 @@ async def config_refresh_loop(
         raise
     finally:
         log.info("config refresh loop stopped")
-

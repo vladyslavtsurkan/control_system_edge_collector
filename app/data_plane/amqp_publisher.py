@@ -1,14 +1,13 @@
 """AMQP batch publisher using *aio_pika* with store-and-forward."""
 
 import asyncio
-import json
-from collections.abc import Sequence
 from typing import Any
 
 import aio_pika
 import structlog
 
 from app.data_plane.persistent_buffer import PersistentEdgeBuffer
+from app.generated import telemetry_pb2
 from app.settings import get_settings
 from app.utils.backoff import retry_with_backoff
 
@@ -81,27 +80,47 @@ class AmqpPublisher:
             self._connected = False
             await self._connect()
 
-    # Publishing
+    @staticmethod
+    def build_protobuf_batch(payloads: list[dict[str, Any]]) -> bytes:
+        """Convert list of dicts (from SQLite) into compressed Protobuf bytes"""
+        batch_pb = telemetry_pb2.TelemetryBatch()
 
-    async def _publish_batch(self, batch: Sequence[dict[str, Any]]) -> None:
-        """Serialise *batch* as a JSON array and publish to the exchange."""
-        body = json.dumps(list(batch)).encode()
+        for data in payloads:
+            reading_pb = batch_pb.readings.add()
+            reading_pb.sensor_id = str(data["sensor_id"])
+            reading_pb.time = int(data["time"])
+            reading_pb.payload.status = data["payload"]["status"]
+
+            # Distribution of values using oneof
+            val = data["payload"]["value"]
+            if isinstance(val, bool):
+                reading_pb.payload.bool_val = val
+            elif isinstance(val, int):
+                reading_pb.payload.int_val = val
+            elif isinstance(val, float):
+                reading_pb.payload.float_val = val
+            elif isinstance(val, str):
+                reading_pb.payload.str_val = val
+
+        return batch_pb.SerializeToString()
+
+    async def _publish_batch(self, batch: list[dict[str, Any]]) -> None:
+        """Serialize *batch* as a JSON array and publish to the exchange."""
+        protobuf_bytes = self.build_protobuf_batch(batch)
 
         message = aio_pika.Message(
-            body=body,
+            body=protobuf_bytes,
             delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
-            content_type="application/json",
+            content_type="application/x-protobuf",
         )
 
         assert self._exchange is not None  # guaranteed after _ensure_connected
         await self._exchange.publish(message, routing_key="telemetry")
 
-        log.debug("batch published", size=len(batch), bytes=len(body))
-
-    # ── Main loop ───────────────────────────────────────────────────
+        log.debug("batch published", size=len(batch), bytes=len(batch))
 
     async def run(self) -> None:
-        """Get oldest batches from the buffer, publish, then commit on success."""
+        """Get the oldest batches from the buffer, publish, then commit on success."""
         while True:
             records = await self._buffer.get_batch(self._settings.BATCH_SIZE)
             if not records:

@@ -1,9 +1,9 @@
 """Pydantic models for the standardised telemetry payload."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 __all__ = ["TelemetryValue", "TelemetryPayload"]
 
@@ -19,5 +19,7 @@ class TelemetryPayload(BaseModel):
     """One telemetry data-point ready for AMQP publishing."""
 
     sensor_id: UUID
-    time: datetime
+    time: int = Field(
+        default_factory=lambda: int(datetime.now(timezone.utc).timestamp() * 1000)
+    )
     payload: TelemetryValue
