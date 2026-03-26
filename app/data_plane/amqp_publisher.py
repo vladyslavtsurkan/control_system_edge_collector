@@ -1,6 +1,8 @@
 """AMQP batch publisher using *aio_pika* with store-and-forward."""
 
 import asyncio
+import ssl
+from yarl import URL
 from typing import Any
 
 import aio_pika
@@ -51,9 +53,35 @@ class AmqpPublisher:
         """
 
         async def _do_connect() -> None:
-            amqp_url = str(self._settings.AMQP_URL)
-            log.info("connecting to AMQP", url=amqp_url)
-            self._connection = await aio_pika.connect_robust(amqp_url)
+            # Set up SSL context for mTLS
+            ssl_context = ssl.create_default_context(
+                purpose=ssl.Purpose.SERVER_AUTH, cafile=self._settings.TLS_CA_CERT_PATH
+            )
+            ssl_context.load_cert_chain(
+                certfile=self._settings.TLS_CLIENT_CERT_PATH,
+                keyfile=self._settings.TLS_CLIENT_KEY_PATH,
+            )
+            ssl_context.check_hostname = self._settings.TLS_CHECK_HOSTNAME
+
+            base_url = str(self._settings.AMQP_URL).replace("guest:guest@", "")
+
+            url = (
+                URL(base_url)
+                .with_user("")
+                .with_password("")
+                .with_query(
+                    {
+                        "auth_mechanism": "EXTERNAL",
+                        "auth": "EXTERNAL",
+                    }
+                )
+            )
+
+            log.info("connecting to AMQP via mTLS (EXTERNAL)", url=str(url))
+
+            self._connection = aio_pika.RobustConnection(url, ssl_context=ssl_context)
+            await self._connection.connect()
+
             self._channel = await self._connection.channel()
             self._exchange = await self._channel.declare_exchange(
                 self._settings.AMQP_EXCHANGE,
@@ -112,6 +140,7 @@ class AmqpPublisher:
             body=protobuf_bytes,
             delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
             content_type="application/x-protobuf",
+            user_id=str(self._settings.organization_id),
         )
 
         assert self._exchange is not None  # guaranteed after _ensure_connected

@@ -2,9 +2,10 @@
 
 import asyncio
 from datetime import datetime
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import aio_pika
+import pytest
 
 from app.data_plane.amqp_publisher import AmqpPublisher
 from app.data_plane.persistent_buffer import PersistentEdgeBuffer
@@ -46,6 +47,11 @@ class TestPublishBatch:
         assert len(parsed.readings) == 2
         assert parsed.readings[0].payload.float_val == 42.0
         assert message.content_type == "application/x-protobuf"
+        assert message.user_id == settings.organization_id
+        assert (
+            call_args.kwargs["routing_key"]
+            == f"telemetry.{settings.organization_id}.sensors"
+        )
 
 
 class TestRunLoop:
@@ -109,3 +115,65 @@ class TestRunLoop:
         await pub.run()
 
         pub._publish_batch.assert_not_awaited()
+
+
+class TestConnect:
+    async def test_connect_passes_none_ssl_context_when_tls_disabled(
+        self,
+        settings: Settings,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        buffer = AsyncMock(spec=PersistentEdgeBuffer)
+        shutdown = asyncio.Event()
+        pub = AmqpPublisher(buffer, shutdown)
+
+        object.__setattr__(settings, "amqp_use_tls", False)
+        connection = AsyncMock()
+        channel = AsyncMock()
+        connection.channel = AsyncMock(return_value=channel)
+        monkeypatch.setattr(
+            "app.data_plane.amqp_publisher.aio_pika.connect_robust",
+            AsyncMock(return_value=connection),
+        )
+
+        await pub._connect()
+
+        connect_mock = aio_pika.connect_robust
+        connect_mock.assert_awaited_once()
+        assert connect_mock.call_args.kwargs["ssl_context"] is None
+
+    async def test_connect_builds_ssl_context_when_tls_enabled(
+        self,
+        settings: Settings,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        buffer = AsyncMock(spec=PersistentEdgeBuffer)
+        shutdown = asyncio.Event()
+        pub = AmqpPublisher(buffer, shutdown)
+
+        object.__setattr__(settings, "amqp_use_tls", True)
+        object.__setattr__(settings, "tls_check_hostname", False)
+
+        ssl_context = Mock()
+        monkeypatch.setattr(
+            "app.data_plane.amqp_publisher.ssl.create_default_context",
+            lambda **_kwargs: ssl_context,
+        )
+
+        connection = AsyncMock()
+        channel = AsyncMock()
+        connection.channel = AsyncMock(return_value=channel)
+        monkeypatch.setattr(
+            "app.data_plane.amqp_publisher.aio_pika.connect_robust",
+            AsyncMock(return_value=connection),
+        )
+
+        await pub._connect()
+
+        ssl_context.load_cert_chain.assert_called_once_with(
+            certfile=settings.tls_client_cert_path,
+            keyfile=settings.TLS_CLIENT_KEY_PATH,
+        )
+        assert ssl_context.check_hostname is False
+        connect_mock = aio_pika.connect_robust
+        assert connect_mock.call_args.kwargs["ssl_context"] is ssl_context

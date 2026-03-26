@@ -3,6 +3,9 @@
 from functools import lru_cache
 from pathlib import Path
 
+from cryptography import x509
+from cryptography.hazmat.backends import default_backend
+from cryptography.x509.oid import NameOID
 from pydantic import AmqpDsn, HttpUrl, SecretStr, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -24,6 +27,17 @@ class Settings(BaseSettings):
     # Data Plane
     AMQP_URL: AmqpDsn = Field(..., alias="AMQP_URL")
     AMQP_EXCHANGE: str = Field("iiot_telemetry", alias="AMQP_EXCHANGE")
+    AMQP_USE_TLS: bool = Field(True, alias="AMQP_USE_TLS")
+    TLS_CA_CERT_PATH: str = Field(
+        "/app/certs/ca_certificate.pem", alias="TLS_CA_CERT_PATH"
+    )
+    TLS_CLIENT_CERT_PATH: str = Field(
+        "/app/certs/collector_certificate.pem", alias="TLS_CLIENT_CERT_PATH"
+    )
+    TLS_CLIENT_KEY_PATH: str = Field(
+        "/app/certs/collector_key.pem", alias="TLS_CLIENT_KEY_PATH"
+    )
+    TLS_CHECK_HOSTNAME: bool = Field(True, alias="TLS_CHECK_HOSTNAME")
 
     # OPC-UA certificates (optional; required if security policy is not "None")
     OPCUA_CERT_PATH: Path | None = Field(None, alias="OPCUA_CERT_PATH")
@@ -45,6 +59,27 @@ class Settings(BaseSettings):
     BACKOFF_BASE_S: float = Field(1.0, alias="BACKOFF_BASE_S")
     BACKOFF_MAX_S: float = Field(60.0, alias="BACKOFF_MAX_S")
     BACKOFF_MAX_RETRIES: int = Field(5, alias="BACKOFF_MAX_RETRIES")
+
+    _organization_id_cache: str | None = None
+
+    @property
+    def organization_id(self) -> str:
+        if not self.AMQP_USE_TLS:
+            if self._organization_id_cache is None:
+                self._organization_id_cache = "00000000-0000-0000-0000-000000000000"
+            return self._organization_id_cache
+
+        if self._organization_id_cache is None:
+            cert_bytes = Path(self.TLS_CLIENT_CERT_PATH).read_bytes()
+            certificate = x509.load_pem_x509_certificate(cert_bytes, default_backend())
+            common_names = certificate.subject.get_attributes_for_oid(
+                NameOID.COMMON_NAME
+            )
+            if not common_names or not common_names[0].value:
+                raise ValueError("COMMON_NAME not found in client certificate subject")
+            self._organization_id_cache = common_names[0].value
+        print("BLABLABLABLA", self._organization_id_cache)
+        return self._organization_id_cache
 
 
 @lru_cache(maxsize=1)

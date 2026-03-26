@@ -1,5 +1,7 @@
 """Tests for ``app.settings``."""
 
+from types import SimpleNamespace
+
 import pytest
 
 from app.settings import Settings
@@ -23,6 +25,64 @@ class TestSettings:
         assert s.CONFIG_REFRESH_JITTER_S == 10.0
         assert s.HEALTH_PORT == 8080
         assert s.OPCUA_CERT_PATH is None
+        assert s.AMQP_USE_TLS is False
+        assert s.TLS_CA_CERT_PATH == "/app/certs/ca_certificate.pem"
+        assert s.tls_client_cert_path == "/app/certs/collector_certificate.pem"
+        assert s.TLS_CLIENT_KEY_PATH == "/app/certs/collector_key.pem"
+        assert s.TLS_CHECK_HOSTNAME is True
+
+    def test_organization_id_returns_dummy_when_tls_disabled(
+        self, env_vars: None
+    ) -> None:
+        s = Settings(_env_file=None)
+        assert s.organization_id == "00000000-0000-0000-0000-000000000000"
+
+    def test_organization_id_reads_cn_from_certificate(
+        self,
+        env_vars: None,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path,
+    ) -> None:
+        cert_path = tmp_path / "collector_certificate.pem"
+        cert_path.write_text("dummy")
+        monkeypatch.setenv("AMQP_USE_TLS", "true")
+        monkeypatch.setenv("TLS_CLIENT_CERT_PATH", str(cert_path))
+
+        certificate = SimpleNamespace(
+            subject=SimpleNamespace(
+                get_attributes_for_oid=lambda _oid: [SimpleNamespace(value="org-uuid")]
+            )
+        )
+        monkeypatch.setattr(
+            "app.settings.x509.load_pem_x509_certificate",
+            lambda _bytes, _backend: certificate,
+        )
+
+        s = Settings(_env_file=None)
+        assert s.organization_id == "org-uuid"
+
+    def test_organization_id_raises_when_cn_missing(
+        self,
+        env_vars: None,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path,
+    ) -> None:
+        cert_path = tmp_path / "collector_certificate.pem"
+        cert_path.write_text("dummy")
+        monkeypatch.setenv("AMQP_USE_TLS", "true")
+        monkeypatch.setenv("TLS_CLIENT_CERT_PATH", str(cert_path))
+
+        certificate = SimpleNamespace(
+            subject=SimpleNamespace(get_attributes_for_oid=lambda _oid: [])
+        )
+        monkeypatch.setattr(
+            "app.settings.x509.load_pem_x509_certificate",
+            lambda _bytes, _backend: certificate,
+        )
+
+        s = Settings(_env_file=None)
+        with pytest.raises(ValueError, match="COMMON_NAME not found"):
+            _ = s.organization_id
 
     def test_missing_required_var_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("CLOUD_API_URL", raising=False)

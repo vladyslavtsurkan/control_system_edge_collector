@@ -19,6 +19,8 @@ services:
     build: .
     env_file:
       - .env
+    volumes:
+      - ./certs:/app/certs:ro
     depends_on:
       opcua-simulator:
         condition: service_healthy
