@@ -1,12 +1,12 @@
 # ── Build stage ──────────────────────────────────────────
 FROM python:3.12-slim AS builder
 
-RUN pip install --no-cache-dir poetry poetry-plugin-export
+COPY --from=ghcr.io/astral-sh/uv:0.11.2 /uv /uvx /bin/
 
 WORKDIR /build
-COPY pyproject.toml poetry.lock ./
+COPY pyproject.toml uv.lock ./
 
-RUN poetry export -f requirements.txt --without-hashes -o requirements.txt \
+RUN uv export --format requirements-txt --locked --no-dev --no-emit-project --no-hashes -o requirements.txt \
     && cat requirements.txt \
     && pip install --no-cache-dir --target=/install -r requirements.txt
 

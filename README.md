@@ -25,15 +25,14 @@
 
 ### Prerequisites
 
-- Python 3.14+
+- Python 3.12
+- uv 0.11.2
 - Docker & Docker Compose (for local RabbitMQ)
 
 ### 1. Clone & install
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
+uv sync --group dev
 ```
 
 ### 2. Configure
@@ -54,13 +53,13 @@ docker compose up collector     # start the collector
 
 ```bash
 # Ensure RabbitMQ is running (e.g. via docker compose up -d rabbitmq)
-python -m app.main
+uv run python -m app.main
 ```
 
 ### 5. Run tests
 
 ```bash
-pytest -v
+uv run pytest -v
 ```
 
 ## Environment Variables
