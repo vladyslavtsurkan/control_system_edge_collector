@@ -78,7 +78,6 @@ class Settings(BaseSettings):
             if not common_names or not common_names[0].value:
                 raise ValueError("COMMON_NAME not found in client certificate subject")
             self._organization_id_cache = common_names[0].value
-        print("BLABLABLABLA", self._organization_id_cache)
         return self._organization_id_cache
 
 
