@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
+from asyncua import ua
 from asyncua.crypto.security_policies import (
     SecurityPolicyAes128Sha256RsaOaep,
     SecurityPolicyAes256Sha256RsaPss,
@@ -427,3 +428,57 @@ class TestOpcuaSubscriberWriteNodeValue:
             await subscriber.write_node_value("ns=2;s=Target_Temperature", 42.0)
 
         await buffer.close()
+
+    async def test_write_node_value_coerces_string_to_node_type(
+        self,
+        sample_config,
+        tmp_path,
+    ) -> None:
+        buffer = PersistentEdgeBuffer(tmp_path / "edge_buffer.db")
+        await buffer.initialize()
+        subscriber = OpcuaSubscriber(sample_config, buffer)
+
+        class _FakeNode:
+            def __init__(self) -> None:
+                self.value = None
+
+            async def read_data_type_as_variant_type(self):
+                return ua.VariantType.Double
+
+            async def write_value(self, value):
+                self.value = value
+
+        fake_node = _FakeNode()
+
+        class _FakeClient:
+            def get_node(self, _node_id: str):
+                return fake_node
+
+        subscriber._client = _FakeClient()  # type: ignore[assignment]
+        subscriber._connected = True
+
+        await subscriber.write_node_value("ns=2;s=Target_Temperature", "50")
+
+        assert isinstance(fake_node.value, ua.Variant)
+        assert fake_node.value.VariantType is ua.VariantType.Double
+        assert fake_node.value.Value == 50.0
+        await buffer.close()
+
+
+class TestResolveControlNodeId:
+    def test_returns_node_id_as_is_for_opcua_string(self, sample_config, tmp_path) -> None:
+        subscriber = OpcuaSubscriber(sample_config, PersistentEdgeBuffer(tmp_path / "edge_buffer.db"))
+        assert (
+            subscriber.resolve_control_node_id("ns=2;s=Target_Temperature")
+            == "ns=2;s=Target_Temperature"
+        )
+
+    def test_resolves_uuid_to_node_id(self, sample_config, tmp_path) -> None:
+        subscriber = OpcuaSubscriber(sample_config, PersistentEdgeBuffer(tmp_path / "edge_buffer.db"))
+        sensor_uuid = str(sample_config.sensors[0].id)
+        assert subscriber.resolve_control_node_id(sensor_uuid) == sample_config.sensors[0].node_id
+
+    def test_returns_none_for_unresolvable_reference(self, sample_config, tmp_path) -> None:
+        subscriber = OpcuaSubscriber(sample_config, PersistentEdgeBuffer(tmp_path / "edge_buffer.db"))
+        assert subscriber.resolve_control_node_id("not-a-node-id") is None
+

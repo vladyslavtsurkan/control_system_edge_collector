@@ -217,6 +217,13 @@ NODES: list[NodeDef] = [
     ),
 ]
 
+# Writable setpoint/command nodes that remain unchanged unless written by a client.
+STATIC_WRITABLE_NODES: list[tuple[str, NodeType, Any, str]] = [
+    ("Target_Temperature", NodeType.FLOAT, 50.0, "degC"),
+    ("Target_Pressure", NodeType.FLOAT, 2.5, "bar"),
+    ("Pump_Enable", NodeType.BOOL, False, ""),
+]
+
 
 # ═══════════════════════════════════════════════════════════════════
 # Value generators
@@ -324,10 +331,16 @@ async def run_server(host: str, port: int, interval: float) -> None:
         await var.set_writable()
         ua_vars[nd.name] = var
 
-    # Stable writable setpoint node for control-command testing.
-    target_temp = await plant.add_variable(idx, "Target_Temperature", 50.0)
-    await target_temp.set_writable()
-    ua_vars["Target_Temperature"] = target_temp
+    for name, node_type, initial_value, _units in STATIC_WRITABLE_NODES:
+        vt = VARIANT_TYPE[node_type]
+        node_id = ua.NodeId(name, idx)
+        var = await plant.add_variable(
+            node_id,
+            name,
+            ua.Variant(initial_value, vt),
+        )
+        await var.set_writable()
+        ua_vars[name] = var
 
     # ── Print startup table ─────────────────────────────────
     separator = "=" * 72
@@ -340,10 +353,11 @@ async def run_server(host: str, port: int, interval: float) -> None:
     for nd in NODES:
         nid = ua_vars[nd.name].nodeid.to_string()
         print(f"  {nd.name:<20} {nd.type.value:<8} {nd.units:<8} {nid}")
-    print(
-        f"  {'Target_Temperature':<20} {'float':<8} {'degC':<8} "
-        f"{ua_vars['Target_Temperature'].nodeid.to_string()}"
-    )
+    for name, node_type, _initial_value, units in STATIC_WRITABLE_NODES:
+        print(
+            f"  {name:<20} {node_type.value:<8} {units:<8} "
+            f"{ua_vars[name].nodeid.to_string()}"
+        )
     print("-" * 72)
     print(f"  Endpoint : {endpoint}")
     print(f"  Namespace: {idx} (urn:edge-collector:simulator)")

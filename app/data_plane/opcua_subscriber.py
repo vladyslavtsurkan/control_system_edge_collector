@@ -268,14 +268,83 @@ class OpcuaSubscriber:
 
         self._connected = False
 
+    def resolve_control_node_id(self, sensor_ref: str) -> str | None:
+        """Resolve control command sensor reference to OPC UA node-id.
+
+        Accepts either a direct OPC UA node-id (e.g. ``ns=2;s=Pump_Enable``)
+        or a sensor UUID that is looked up in current collector config.
+        """
+        if sensor_ref.startswith("ns=") and ";" in sensor_ref:
+            return sensor_ref
+
+        try:
+            sensor_uuid = UUID(sensor_ref)
+        except ValueError:
+            return None
+
+        for sensor in self._config.sensors:
+            if sensor.id == sensor_uuid:
+                return sensor.node_id
+        return None
+
+    @staticmethod
+    def _coerce_value_for_variant_type(value: Any, variant_type: ua.VariantType) -> Any:
+        if variant_type in {ua.VariantType.Double, ua.VariantType.Float}:
+            return float(value)
+
+        if variant_type in {
+            ua.VariantType.SByte,
+            ua.VariantType.Byte,
+            ua.VariantType.Int16,
+            ua.VariantType.UInt16,
+            ua.VariantType.Int32,
+            ua.VariantType.UInt32,
+            ua.VariantType.Int64,
+            ua.VariantType.UInt64,
+        }:
+            return int(value)
+
+        if variant_type is ua.VariantType.Boolean:
+            if isinstance(value, bool):
+                return value
+            if isinstance(value, str):
+                normalized = value.strip().lower()
+                if normalized in {"true", "1", "yes", "on"}:
+                    return True
+                if normalized in {"false", "0", "no", "off"}:
+                    return False
+            if isinstance(value, (int, float)):
+                return bool(value)
+            raise ValueError(f"Cannot coerce {value!r} to bool")
+
+        if variant_type is ua.VariantType.String:
+            return str(value)
+
+        return value
+
     async def write_node_value(self, node_id: str, value: Any) -> None:
         if not self._connected or not self._client:
             raise RuntimeError("OPC UA subscriber is not connected")
 
         node = self._client.get_node(node_id)
         try:
-            await node.write_value(value)
-            log.info("OPC UA node write succeeded", node_id=node_id, value=value)
+            typed_value: Any = value
+            variant_type: ua.VariantType | None = None
+            if hasattr(node, "read_data_type_as_variant_type"):
+                variant_type = await node.read_data_type_as_variant_type()
+                typed_value = self._coerce_value_for_variant_type(value, variant_type)
+
+            if variant_type is not None:
+                await node.write_value(ua.Variant(typed_value, variant_type))
+            else:
+                await node.write_value(typed_value)
+
+            log.info(
+                "OPC UA node write succeeded",
+                node_id=node_id,
+                value=typed_value,
+                original_value=value,
+            )
         except Exception:
             log.exception("OPC UA node write failed", node_id=node_id, value=value)
             raise

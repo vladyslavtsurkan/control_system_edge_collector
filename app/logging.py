@@ -8,7 +8,7 @@ import structlog
 __all__ = ["setup_logging"]
 
 
-def setup_logging(*, log_level: str = "INFO") -> None:
+def setup_logging(*, log_level: str = "WARNING") -> None:
     """Configure structlog for JSON output to stdout.
 
     Also patches stdlib ``logging`` so that library loggers

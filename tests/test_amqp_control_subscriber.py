@@ -19,6 +19,12 @@ from app.settings import Settings
 class _FakeOpcuaClient:
     def __init__(self) -> None:
         self.write_node_value = AsyncMock()
+        self._mapping: dict[str, str] = {}
+
+    def resolve_control_node_id(self, sensor_ref: str) -> str | None:
+        if sensor_ref.startswith("ns=") and ";" in sensor_ref:
+            return sensor_ref
+        return self._mapping.get(sensor_ref)
 
 
 class TestConnect:
@@ -115,6 +121,63 @@ class TestCommandHandling:
             61.5,
         )
 
+    async def test_handle_message_resolves_uuid_sensor_id(
+        self, settings: Settings
+    ) -> None:
+        object.__setattr__(settings, "AMQP_USE_TLS", False)
+        fake_client = _FakeOpcuaClient()
+        sensor_uuid = "019d4ada-f02b-71b3-85e6-13f30a9836d5"
+        fake_client._mapping[sensor_uuid] = "ns=2;s=Target_Temperature"
+        opcua = cast(OpcuaSubscriber, fake_client)
+        sub = AmqpControlSubscriber(opcua, asyncio.Event())
+
+        control_command_ctor: Callable[..., Any] = getattr(
+            telemetry_pb2, "ControlCommand"
+        )
+        cmd = control_command_ctor(
+            command_id="cmd-uuid",
+            sensor_id=sensor_uuid,
+            timestamp=3,
+            float_val=44.0,
+        )
+        msg = cast(
+            aio_pika.abc.AbstractIncomingMessage,
+            SimpleNamespace(body=cmd.SerializeToString()),
+        )
+
+        await sub._handle_message(msg)
+
+        fake_client.write_node_value.assert_awaited_once_with(
+            "ns=2;s=Target_Temperature",
+            44.0,
+        )
+
+    async def test_handle_message_skips_when_sensor_id_unresolved(
+        self, settings: Settings
+    ) -> None:
+        object.__setattr__(settings, "AMQP_USE_TLS", False)
+        fake_client = _FakeOpcuaClient()
+        opcua = cast(OpcuaSubscriber, fake_client)
+        sub = AmqpControlSubscriber(opcua, asyncio.Event())
+
+        control_command_ctor: Callable[..., Any] = getattr(
+            telemetry_pb2, "ControlCommand"
+        )
+        cmd = control_command_ctor(
+            command_id="cmd-unresolved",
+            sensor_id="019d4ada-f02b-71b3-85e6-13f30a9836d5",
+            timestamp=4,
+            float_val=44.0,
+        )
+        msg = cast(
+            aio_pika.abc.AbstractIncomingMessage,
+            SimpleNamespace(body=cmd.SerializeToString()),
+        )
+
+        await sub._handle_message(msg)
+
+        fake_client.write_node_value.assert_not_awaited()
+
     async def test_handle_message_skips_when_oneof_missing(
         self, settings: Settings
     ) -> None:
@@ -138,3 +201,31 @@ class TestCommandHandling:
         await sub._handle_message(msg)
 
         cast(_FakeOpcuaClient, opcua).write_node_value.assert_not_awaited()
+
+    async def test_handle_message_drops_command_when_write_fails(
+        self, settings: Settings
+    ) -> None:
+        object.__setattr__(settings, "AMQP_USE_TLS", False)
+        fake_client = _FakeOpcuaClient()
+        fake_client.write_node_value = AsyncMock(side_effect=ValueError("bad type"))
+        opcua = cast(OpcuaSubscriber, fake_client)
+        sub = AmqpControlSubscriber(opcua, asyncio.Event())
+
+        control_command_ctor: Callable[..., Any] = getattr(
+            telemetry_pb2, "ControlCommand"
+        )
+        cmd = control_command_ctor(
+            command_id="cmd-type-mismatch",
+            sensor_id="ns=2;s=Target_Temperature",
+            timestamp=5,
+            str_val="1500",
+        )
+        msg = cast(
+            aio_pika.abc.AbstractIncomingMessage,
+            SimpleNamespace(body=cmd.SerializeToString()),
+        )
+
+        await sub._handle_message(msg)
+
+        fake_client.write_node_value.assert_awaited_once()
+

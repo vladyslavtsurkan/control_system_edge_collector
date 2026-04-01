@@ -131,11 +131,33 @@ class AmqpControlSubscriber:
             )
             return
 
-        await self._opcua_client.write_node_value(cmd.sensor_id, target_value)
+        resolved_node_id = self._opcua_client.resolve_control_node_id(cmd.sensor_id)
+        if resolved_node_id is None:
+            log.warning(
+                "control command sensor_id could not be resolved to node_id",
+                command_id=cmd.command_id,
+                sensor_id=cmd.sensor_id,
+            )
+            return
+
+        try:
+            await self._opcua_client.write_node_value(resolved_node_id, target_value)
+        except Exception:
+            # Drop malformed/incompatible command payloads after logging.
+            log.exception(
+                "control command apply failed",
+                command_id=cmd.command_id,
+                sensor_id=cmd.sensor_id,
+                node_id=resolved_node_id,
+                target_value=target_value,
+            )
+            return
+
         log.info(
             "control command applied",
             command_id=cmd.command_id,
             sensor_id=cmd.sensor_id,
+            node_id=resolved_node_id,
             target_value=target_value,
         )
 
