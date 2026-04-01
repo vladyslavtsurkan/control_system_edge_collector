@@ -16,6 +16,7 @@ def env_vars(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("X_API_KEY", "test-key-123")
     monkeypatch.setenv("AMQP_URL", "amqp://guest:guest@localhost:5672/")
     monkeypatch.setenv("AMQP_EXCHANGE", "test_exchange")
+    monkeypatch.setenv("AMQP_CONTROL_EXCHANGE", "test_control_exchange")
 
 
 @pytest.fixture()
@@ -27,6 +28,7 @@ def settings(env_vars: None, monkeypatch: pytest.MonkeyPatch) -> Settings:
     monkeypatch.setattr("app.settings.get_settings", _getter)
     monkeypatch.setattr("app.control_plane.api_client.get_settings", _getter)
     monkeypatch.setattr("app.control_plane.config_refresh.get_settings", _getter)
+    monkeypatch.setattr("app.control_plane.amqp_subscriber.get_settings", _getter)
     monkeypatch.setattr("app.data_plane.amqp_publisher.get_settings", _getter)
     monkeypatch.setattr("app.data_plane.opcua_subscriber.get_settings", _getter)
     monkeypatch.setattr("app.data_plane.persistent_buffer.get_settings", _getter)

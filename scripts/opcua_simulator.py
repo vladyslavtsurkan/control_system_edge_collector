@@ -315,7 +315,7 @@ async def run_server(host: str, port: int, interval: float) -> None:
     ua_vars: dict[str, Any] = {}
     for nd in NODES:
         vt = VARIANT_TYPE[nd.type]
-        node_id = ua.NodeId(nd.name, idx)  # → ns=2;s=<Name>
+        node_id = ua.NodeId(nd.name, idx)  # -> ns=2;s=<Name>
         var = await plant.add_variable(
             node_id,
             nd.name,
@@ -323,6 +323,11 @@ async def run_server(host: str, port: int, interval: float) -> None:
         )
         await var.set_writable()
         ua_vars[nd.name] = var
+
+    # Stable writable setpoint node for control-command testing.
+    target_temp = await plant.add_variable(idx, "Target_Temperature", 50.0)
+    await target_temp.set_writable()
+    ua_vars["Target_Temperature"] = target_temp
 
     # ── Print startup table ─────────────────────────────────
     separator = "=" * 72
@@ -335,11 +340,15 @@ async def run_server(host: str, port: int, interval: float) -> None:
     for nd in NODES:
         nid = ua_vars[nd.name].nodeid.to_string()
         print(f"  {nd.name:<20} {nd.type.value:<8} {nd.units:<8} {nid}")
+    print(
+        f"  {'Target_Temperature':<20} {'float':<8} {'degC':<8} "
+        f"{ua_vars['Target_Temperature'].nodeid.to_string()}"
+    )
     print("-" * 72)
     print(f"  Endpoint : {endpoint}")
     print(f"  Namespace: {idx} (urn:edge-collector:simulator)")
     print(f"  Interval : {interval}s")
-    print(f"  Nodes    : {len(NODES)}")
+    print(f"  Nodes    : {len(ua_vars)}")
     print("  Auth     : anonymous")
     print(separator)
     print()

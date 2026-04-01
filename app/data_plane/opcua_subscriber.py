@@ -268,6 +268,18 @@ class OpcuaSubscriber:
 
         self._connected = False
 
+    async def write_node_value(self, node_id: str, value: Any) -> None:
+        if not self._connected or not self._client:
+            raise RuntimeError("OPC UA subscriber is not connected")
+
+        node = self._client.get_node(node_id)
+        try:
+            await node.write_value(value)
+            log.info("OPC UA node write succeeded", node_id=node_id, value=value)
+        except Exception:
+            log.exception("OPC UA node write failed", node_id=node_id, value=value)
+            raise
+
     async def reconfigure(self, config: CollectorConfig) -> None:
         """Apply a new collector config with minimal disruption.
 

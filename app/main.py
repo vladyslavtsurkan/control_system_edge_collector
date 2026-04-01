@@ -18,6 +18,7 @@ import sys
 
 import structlog
 
+from app.control_plane.amqp_subscriber import AmqpControlSubscriber
 from app.control_plane.api_client import fetch_collector_config
 from app.control_plane.config_refresh import config_refresh_loop
 from app.data_plane.amqp_publisher import AmqpPublisher
@@ -52,6 +53,7 @@ async def main() -> None:
     # Instantiate components
     subscriber = OpcuaSubscriber(config, buffer)
     publisher = AmqpPublisher(buffer, shutdown_event)
+    control_subscriber = AmqpControlSubscriber(subscriber, shutdown_event)
     health = HealthServer(
         settings.HEALTH_HOST,
         settings.HEALTH_PORT,
@@ -82,7 +84,11 @@ async def main() -> None:
         name="config-refresh",
     )
     publisher_task = asyncio.create_task(publisher.run(), name="amqp-publisher")
-    log.info("edge collector running – press Ctrl+C to stop")
+    control_task = asyncio.create_task(
+        control_subscriber.run(),
+        name="amqp-control-subscriber",
+    )
+    log.info("edge collector running - press Ctrl+C to stop")
 
     # Wait for shutdown
     await shutdown_event.wait()
@@ -91,8 +97,14 @@ async def main() -> None:
     log.info("shutting down …")
 
     config_refresh_task.cancel()
+    control_task.cancel()
     try:
         await config_refresh_task
+    except asyncio.CancelledError:
+        pass
+
+    try:
+        await control_task
     except asyncio.CancelledError:
         pass
 

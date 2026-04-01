@@ -19,7 +19,7 @@ _sym_db = _symbol_database.Default()
 
 
 DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(
-    b'\n\x0ftelemetry.proto\x12\x11iiot.telemetry.v1"z\n\x10TelemetryPayload\x12\x0e\n\x06status\x18\x01 \x01(\t\x12\x12\n\x08\x62ool_val\x18\x02 \x01(\x08H\x00\x12\x11\n\x07int_val\x18\x03 \x01(\x03H\x00\x12\x13\n\tfloat_val\x18\x04 \x01(\x01H\x00\x12\x11\n\x07str_val\x18\x05 \x01(\tH\x00\x42\x07\n\x05value"i\n\x10TelemetryReading\x12\x11\n\tsensor_id\x18\x01 \x01(\t\x12\x0c\n\x04time\x18\x02 \x01(\x03\x12\x34\n\x07payload\x18\x03 \x01(\x0b\x32#.iiot.telemetry.v1.TelemetryPayload"G\n\x0eTelemetryBatch\x12\x35\n\x08readings\x18\x01 \x03(\x0b\x32#.iiot.telemetry.v1.TelemetryReadingb\x06proto3'
+    b'\n\x0ftelemetry.proto\x12\x11iiot.telemetry.v1"z\n\x10TelemetryPayload\x12\x0e\n\x06status\x18\x01 \x01(\t\x12\x12\n\x08\x62ool_val\x18\x02 \x01(\x08H\x00\x12\x11\n\x07int_val\x18\x03 \x01(\x03H\x00\x12\x13\n\tfloat_val\x18\x04 \x01(\x01H\x00\x12\x11\n\x07str_val\x18\x05 \x01(\tH\x00\x42\x07\n\x05value"i\n\x10TelemetryReading\x12\x11\n\tsensor_id\x18\x01 \x01(\t\x12\x0c\n\x04time\x18\x02 \x01(\x03\x12\x34\n\x07payload\x18\x03 \x01(\x0b\x32#.iiot.telemetry.v1.TelemetryPayload"G\n\x0eTelemetryBatch\x12\x35\n\x08readings\x18\x01 \x03(\x0b\x32#.iiot.telemetry.v1.TelemetryReading"\xa9\x01\n\x0e\x43ontrolCommand\x12\x12\n\ncommand_id\x18\x01 \x01(\t\x12\x11\n\tsensor_id\x18\x02 \x01(\t\x12\x11\n\ttimestamp\x18\x03 \x01(\x03\x12\x12\n\x08\x62ool_val\x18\x04 \x01(\x08H\x00\x12\x11\n\x07int_val\x18\x05 \x01(\x03H\x00\x12\x13\n\tfloat_val\x18\x06 \x01(\x01H\x00\x12\x11\n\x07str_val\x18\x07 \x01(\tH\x00\x42\x0e\n\x0ctarget_valueb\x06proto3'
 )
 
 _globals = globals()
@@ -33,4 +33,6 @@ if not _descriptor._USE_C_DESCRIPTORS:
     _globals["_TELEMETRYREADING"]._serialized_end = 267
     _globals["_TELEMETRYBATCH"]._serialized_start = 269
     _globals["_TELEMETRYBATCH"]._serialized_end = 340
+    _globals["_CONTROLCOMMAND"]._serialized_start = 343
+    _globals["_CONTROLCOMMAND"]._serialized_end = 512
 # @@protoc_insertion_point(module_scope)

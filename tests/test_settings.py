@@ -14,8 +14,10 @@ class TestSettings:
         assert s.X_API_KEY.get_secret_value() == "test-key-123"
         assert str(s.AMQP_URL) == "amqp://guest:guest@localhost:5672/"
         assert s.AMQP_EXCHANGE == "test_exchange"
+        assert s.AMQP_CONTROL_EXCHANGE == "test_control_exchange"
 
-    def test_defaults(self, env_vars: None) -> None:
+    def test_defaults(self, env_vars: None, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("AMQP_CONTROL_EXCHANGE", raising=False)
         s = Settings(_env_file=None)
         assert s.QUEUE_MAX_SIZE == 10_000
         assert str(s.EDGE_BUFFER_DB_PATH) == "edge_buffer.db"
@@ -30,6 +32,7 @@ class TestSettings:
         assert s.TLS_CLIENT_CERT_PATH == "/app/certs/collector_certificate.pem"
         assert s.TLS_CLIENT_KEY_PATH == "/app/certs/collector_key.pem"
         assert s.TLS_CHECK_HOSTNAME is True
+        assert s.AMQP_CONTROL_EXCHANGE == "iiot_control_command"
 
     def test_organization_id_returns_dummy_when_tls_disabled(
         self, env_vars: None, monkeypatch: pytest.MonkeyPatch

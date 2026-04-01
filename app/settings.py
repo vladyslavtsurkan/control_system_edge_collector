@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     # Data Plane
     AMQP_URL: AmqpDsn = Field(..., alias="AMQP_URL")
     AMQP_EXCHANGE: str = Field("iiot_telemetry", alias="AMQP_EXCHANGE")
+    AMQP_CONTROL_EXCHANGE: str = Field(
+        "iiot_control_command", alias="AMQP_CONTROL_EXCHANGE"
+    )
     AMQP_USE_TLS: bool = Field(True, alias="AMQP_USE_TLS")
     TLS_CA_CERT_PATH: str = Field(
         "/app/certs/ca_certificate.pem", alias="TLS_CA_CERT_PATH"

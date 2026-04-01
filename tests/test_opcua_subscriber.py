@@ -381,3 +381,49 @@ class TestOpcuaSubscriberReconfigure:
 
         await subscriber.stop()
         await buffer.close()
+
+
+class TestOpcuaSubscriberWriteNodeValue:
+    async def test_write_node_value_writes_when_connected(
+        self,
+        sample_config,
+        tmp_path,
+    ) -> None:
+        buffer = PersistentEdgeBuffer(tmp_path / "edge_buffer.db")
+        await buffer.initialize()
+        subscriber = OpcuaSubscriber(sample_config, buffer)
+
+        class _FakeNode:
+            def __init__(self) -> None:
+                self.value = None
+
+            async def write_value(self, value):
+                self.value = value
+
+        fake_node = _FakeNode()
+
+        class _FakeClient:
+            def get_node(self, _node_id: str):
+                return fake_node
+
+        subscriber._client = _FakeClient()  # type: ignore[assignment]
+        subscriber._connected = True
+
+        await subscriber.write_node_value("ns=2;s=Target_Temperature", 55.5)
+
+        assert fake_node.value == 55.5
+        await buffer.close()
+
+    async def test_write_node_value_raises_when_not_connected(
+        self,
+        sample_config,
+        tmp_path,
+    ) -> None:
+        buffer = PersistentEdgeBuffer(tmp_path / "edge_buffer.db")
+        await buffer.initialize()
+        subscriber = OpcuaSubscriber(sample_config, buffer)
+
+        with pytest.raises(RuntimeError, match="not connected"):
+            await subscriber.write_node_value("ns=2;s=Target_Temperature", 42.0)
+
+        await buffer.close()

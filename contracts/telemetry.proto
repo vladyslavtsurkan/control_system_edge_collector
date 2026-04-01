@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package iiot.telemetry.v1;
 
+// Telemetry payload that can hold different types of values (bool, int, float, string)
 message TelemetryPayload {
     string status = 1;
 
@@ -13,12 +14,28 @@ message TelemetryPayload {
     }
 }
 
+// Single telemetry reading from a device/sensor at the Edge
 message TelemetryReading {
     string sensor_id = 1;
     int64 time = 2;
     TelemetryPayload payload = 3;
 }
 
+// Batch of telemetry readings sent from the Edge to the Cloud
 message TelemetryBatch {
     repeated TelemetryReading readings = 1;
+}
+
+// Command sent from the Cloud to the Edge to control a device/sensor
+message ControlCommand {
+    string command_id = 1;
+    string sensor_id = 2;
+    int64 timestamp = 3;
+
+    oneof target_value {
+        bool bool_val = 4;
+        int64 int_val = 5;
+        double float_val = 6;
+        string str_val = 7;
+    }
 }
