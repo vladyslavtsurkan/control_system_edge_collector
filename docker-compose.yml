@@ -12,6 +12,9 @@ services:
     ports:
       - "4840:4840"
     restart: unless-stopped
+    volumes:
+      - ./app:/home/collector/app/app
+      - ./scripts:/home/collector/app/scripts
     networks:
       - control-system-network
 
@@ -20,6 +23,8 @@ services:
     env_file:
       - .env
     volumes:
+      - ./app:/home/collector/app/app
+      - ./scripts:/home/collector/app/scripts
       - ./certs:/app/certs:ro
     depends_on:
       opcua-simulator:
