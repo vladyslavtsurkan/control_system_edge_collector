@@ -23,6 +23,7 @@ class TestSettings:
         assert str(s.EDGE_BUFFER_DB_PATH) == "edge_buffer.db"
         assert s.BATCH_SIZE == 100
         assert s.BATCH_TIMEOUT_S == 1.0
+        assert s.AMQP_HEARTBEAT_S == 15
         assert s.CONFIG_REFRESH_INTERVAL_S == 300.0
         assert s.CONFIG_REFRESH_JITTER_S == 10.0
         assert s.HEALTH_PORT == 8080
@@ -95,3 +96,10 @@ class TestSettings:
         monkeypatch.delenv("AMQP_EXCHANGE", raising=False)
         with pytest.raises(Exception):
             Settings(_env_file=None)
+
+    def test_amqp_heartbeat_can_be_overridden(
+        self, env_vars: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("AMQP_HEARTBEAT_S", "5")
+        s = Settings(_env_file=None)
+        assert s.AMQP_HEARTBEAT_S == 5

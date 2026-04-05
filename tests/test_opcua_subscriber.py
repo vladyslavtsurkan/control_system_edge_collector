@@ -466,19 +466,31 @@ class TestOpcuaSubscriberWriteNodeValue:
 
 
 class TestResolveControlNodeId:
-    def test_returns_node_id_as_is_for_opcua_string(self, sample_config, tmp_path) -> None:
-        subscriber = OpcuaSubscriber(sample_config, PersistentEdgeBuffer(tmp_path / "edge_buffer.db"))
+    def test_returns_node_id_as_is_for_opcua_string(
+        self, sample_config, tmp_path
+    ) -> None:
+        subscriber = OpcuaSubscriber(
+            sample_config, PersistentEdgeBuffer(tmp_path / "edge_buffer.db")
+        )
         assert (
             subscriber.resolve_control_node_id("ns=2;s=Target_Temperature")
             == "ns=2;s=Target_Temperature"
         )
 
     def test_resolves_uuid_to_node_id(self, sample_config, tmp_path) -> None:
-        subscriber = OpcuaSubscriber(sample_config, PersistentEdgeBuffer(tmp_path / "edge_buffer.db"))
+        subscriber = OpcuaSubscriber(
+            sample_config, PersistentEdgeBuffer(tmp_path / "edge_buffer.db")
+        )
         sensor_uuid = str(sample_config.sensors[0].id)
-        assert subscriber.resolve_control_node_id(sensor_uuid) == sample_config.sensors[0].node_id
+        assert (
+            subscriber.resolve_control_node_id(sensor_uuid)
+            == sample_config.sensors[0].node_id
+        )
 
-    def test_returns_none_for_unresolvable_reference(self, sample_config, tmp_path) -> None:
-        subscriber = OpcuaSubscriber(sample_config, PersistentEdgeBuffer(tmp_path / "edge_buffer.db"))
+    def test_returns_none_for_unresolvable_reference(
+        self, sample_config, tmp_path
+    ) -> None:
+        subscriber = OpcuaSubscriber(
+            sample_config, PersistentEdgeBuffer(tmp_path / "edge_buffer.db")
+        )
         assert subscriber.resolve_control_node_id("not-a-node-id") is None
-

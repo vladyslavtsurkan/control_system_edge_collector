@@ -57,6 +57,7 @@ class Settings(BaseSettings):
     QUEUE_MAX_SIZE: int = Field(10_000, alias="QUEUE_MAX_SIZE")
     BATCH_SIZE: int = Field(100, alias="BATCH_SIZE")
     BATCH_TIMEOUT_S: float = Field(1.0, alias="BATCH_TIMEOUT_S")
+    AMQP_HEARTBEAT_S: int = Field(15, alias="AMQP_HEARTBEAT_S")
     CONFIG_REFRESH_INTERVAL_S: float = Field(300.0, alias="CONFIG_REFRESH_INTERVAL_S")
     CONFIG_REFRESH_JITTER_S: float = Field(10.0, alias="CONFIG_REFRESH_JITTER_S")
     BACKOFF_BASE_S: float = Field(1.0, alias="BACKOFF_BASE_S")

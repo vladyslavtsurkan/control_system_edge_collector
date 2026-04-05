@@ -35,6 +35,7 @@ class TestConnect:
     ) -> None:
         object.__setattr__(settings, "AMQP_USE_TLS", False)
         object.__setattr__(settings, "TLS_CHECK_HOSTNAME", False)
+        object.__setattr__(settings, "AMQP_HEARTBEAT_S", 20)
 
         opcua = cast(OpcuaSubscriber, _FakeOpcuaClient())
         sub = AmqpControlSubscriber(opcua, asyncio.Event())
@@ -76,6 +77,7 @@ class TestConnect:
         url_arg = robust_connection_ctor.call_args.args[0]
         assert "auth_mechanism=EXTERNAL" in str(url_arg)
         assert "auth=EXTERNAL" in str(url_arg)
+        assert "heartbeat=20" in str(url_arg)
 
         channel.declare_exchange.assert_awaited_once_with(
             settings.AMQP_CONTROL_EXCHANGE,
@@ -228,4 +230,3 @@ class TestCommandHandling:
         await sub._handle_message(msg)
 
         fake_client.write_node_value.assert_awaited_once()
-

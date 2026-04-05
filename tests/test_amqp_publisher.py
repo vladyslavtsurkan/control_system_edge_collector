@@ -176,6 +176,7 @@ class TestConnect:
         object.__setattr__(settings, "TLS_CA_CERT_PATH", "/tmp/ca.pem")
         object.__setattr__(settings, "TLS_CLIENT_CERT_PATH", "/tmp/client.pem")
         object.__setattr__(settings, "TLS_CLIENT_KEY_PATH", "/tmp/client.key")
+        object.__setattr__(settings, "AMQP_HEARTBEAT_S", 12)
 
         ssl_context = Mock()
         create_context_mock = Mock(return_value=ssl_context)
@@ -209,3 +210,4 @@ class TestConnect:
         url_arg = robust_connection_ctor.call_args.args[0]
         assert "auth_mechanism=EXTERNAL" in str(url_arg)
         assert "auth=EXTERNAL" in str(url_arg)
+        assert "heartbeat=12" in str(url_arg)

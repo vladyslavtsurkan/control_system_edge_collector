@@ -59,6 +59,7 @@ class AmqpControlSubscriber:
                     {
                         "auth_mechanism": "EXTERNAL",
                         "auth": "EXTERNAL",
+                        "heartbeat": str(self._settings.AMQP_HEARTBEAT_S),
                     }
                 )
             )

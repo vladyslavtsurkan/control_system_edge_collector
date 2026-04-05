@@ -19,7 +19,7 @@
 
 **Control Plane** — Fetches OPC UA configuration (server URL, sensors, auth) from the Cloud REST API on startup and then refreshes it periodically.
 
-**Data Plane** — Subscribes to OPC UA data-change notifications, persists payloads in a local SQLite buffer, and publishes batched JSON arrays to RabbitMQ.
+**Data Plane** — Subscribes to OPC UA data-change notifications, persists payloads in a local SQLite buffer, and publishes batched telemetry to RabbitMQ.
 
 ## Quick Start
 
@@ -78,6 +78,7 @@ uv run pytest -v
 | `QUEUE_MAX_SIZE` | ❌ | `10000` | Deprecated legacy setting from in-memory queue implementation |
 | `BATCH_SIZE` | ❌ | `100` | Max messages per AMQP batch |
 | `BATCH_TIMEOUT_S` | ❌ | `1.0` | Max seconds to wait before publishing a partial batch |
+| `AMQP_HEARTBEAT_S` | ❌ | `15` | Native AMQP heartbeat interval in seconds for RabbitMQ connections (`0` disables client-side request) |
 | `CONFIG_REFRESH_INTERVAL_S` | ❌ | `300.0` | Base interval (seconds) between Cloud config refresh requests |
 | `CONFIG_REFRESH_JITTER_S` | ❌ | `10.0` | Random offset (0..N seconds) added to each config refresh interval |
 | `BACKOFF_BASE_S` | ❌ | `1.0` | Initial delay used for AMQP reconnect retries |
