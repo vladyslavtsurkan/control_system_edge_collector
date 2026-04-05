@@ -31,6 +31,7 @@ class Settings(BaseSettings):
         "iiot_control_command", alias="AMQP_CONTROL_EXCHANGE"
     )
     AMQP_USE_TLS: bool = Field(True, alias="AMQP_USE_TLS")
+    AMQP_HEARTBEAT_S: int = Field(15, alias="AMQP_HEARTBEAT_S")
     TLS_CA_CERT_PATH: str = Field(
         "/app/certs/ca_certificate.pem", alias="TLS_CA_CERT_PATH"
     )
@@ -55,11 +56,13 @@ class Settings(BaseSettings):
         Path("edge_buffer.db"), alias="EDGE_BUFFER_DB_PATH"
     )
     QUEUE_MAX_SIZE: int = Field(10_000, alias="QUEUE_MAX_SIZE")
+
     BATCH_SIZE: int = Field(100, alias="BATCH_SIZE")
     BATCH_TIMEOUT_S: float = Field(1.0, alias="BATCH_TIMEOUT_S")
-    AMQP_HEARTBEAT_S: int = Field(15, alias="AMQP_HEARTBEAT_S")
+
     CONFIG_REFRESH_INTERVAL_S: float = Field(300.0, alias="CONFIG_REFRESH_INTERVAL_S")
     CONFIG_REFRESH_JITTER_S: float = Field(10.0, alias="CONFIG_REFRESH_JITTER_S")
+
     BACKOFF_BASE_S: float = Field(1.0, alias="BACKOFF_BASE_S")
     BACKOFF_MAX_S: float = Field(60.0, alias="BACKOFF_MAX_S")
     BACKOFF_MAX_RETRIES: int = Field(5, alias="BACKOFF_MAX_RETRIES")
