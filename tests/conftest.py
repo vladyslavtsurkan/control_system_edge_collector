@@ -13,7 +13,8 @@ from app.settings import Settings, get_settings
 def env_vars(monkeypatch: pytest.MonkeyPatch) -> None:
     """Set minimal required environment variables."""
     monkeypatch.setenv("CLOUD_API_URL", "https://api.test.com/")
-    monkeypatch.setenv("X_API_KEY", "test-key-123")
+    monkeypatch.setenv("X_API_KEY_ID", "a3f8c2b1d4e0f900aabbccdd00112233")
+    monkeypatch.setenv("X_API_KEY_SECRET", "test-secret-b64url")
     monkeypatch.setenv("AMQP_URL", "amqp://guest:guest@localhost:5672/")
     monkeypatch.setenv("AMQP_EXCHANGE", "test_exchange")
     monkeypatch.setenv("AMQP_CONTROL_EXCHANGE", "test_control_exchange")

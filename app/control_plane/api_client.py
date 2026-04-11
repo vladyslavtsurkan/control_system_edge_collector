@@ -26,7 +26,10 @@ async def fetch_collector_config() -> CollectorConfig:
     settings = get_settings()
 
     url = f"{settings.CLOUD_API_URL}api/v1/collector/config"
-    headers = {"X-API-KEY": settings.X_API_KEY.get_secret_value()}
+    headers = {
+        "X-API-Key-ID": settings.X_API_KEY_ID,
+        "X-API-Key-Secret": settings.X_API_KEY_SECRET.get_secret_value(),
+    }
 
     async def _do_request() -> CollectorConfig:
         async with httpx.AsyncClient(timeout=30.0) as client:

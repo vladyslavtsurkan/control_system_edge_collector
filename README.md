@@ -39,7 +39,7 @@ uv sync --group dev
 
 ```bash
 cp .env.example .env
-# Edit .env with your Cloud API URL, API key, and AMQP details
+# Edit .env with your Cloud API URL, API key ID + secret, and AMQP details
 ```
 
 ### 3. Run with Docker Compose (recommended)
@@ -67,7 +67,8 @@ uv run pytest -v
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `CLOUD_API_URL` | ✅ | — | Cloud SaaS API base URL |
-| `X_API_KEY` | ✅ | — | M2M authentication key |
+| `X_API_KEY_ID` | ✅ | — | API key ID (32-char hex) — copied from `POST /opc-servers/{id}/api-keys` response |
+| `X_API_KEY_SECRET` | ✅ | — | API key secret (base64url) — copied from `POST /opc-servers/{id}/api-keys` response |
 | `AMQP_URL` | ✅ | — | RabbitMQ connection string |
 | `AMQP_EXCHANGE` | ✅ | `iiot_telemetry` | AMQP exchange name |
 | `OPCUA_CERT_PATH` | ❌ | `None` | Client certificate for encrypted OPC UA policies |

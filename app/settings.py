@@ -22,7 +22,8 @@ class Settings(BaseSettings):
 
     # Control Plane
     CLOUD_API_URL: HttpUrl = Field(..., alias="CLOUD_API_URL")
-    X_API_KEY: SecretStr = Field(..., alias="X_API_KEY")
+    X_API_KEY_ID: str = Field(..., alias="X_API_KEY_ID")
+    X_API_KEY_SECRET: SecretStr = Field(..., alias="X_API_KEY_SECRET")
 
     # Data Plane
     AMQP_URL: AmqpDsn = Field(..., alias="AMQP_URL")

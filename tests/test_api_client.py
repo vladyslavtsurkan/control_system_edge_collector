@@ -38,13 +38,17 @@ class TestFetchCollectorConfig:
         settings: Settings,
         _cloud_api_config_payload: dict,
     ) -> None:
-        respx.get(f"{settings.CLOUD_API_URL}api/v1/collector/config").respond(
+        route = respx.get(f"{settings.CLOUD_API_URL}api/v1/collector/config").respond(
             200, json=_cloud_api_config_payload
         )
 
         config = await fetch_collector_config()
         assert config.name == "Test Collector"
         assert len(config.sensors) == 1
+
+        sent_headers = route.calls.last.request.headers
+        assert sent_headers["x-api-key-id"] == settings.X_API_KEY_ID
+        assert sent_headers["x-api-key-secret"] == settings.X_API_KEY_SECRET.get_secret_value()
 
     @respx.mock
     async def test_4xx_raises_immediately(self, settings: Settings) -> None:
